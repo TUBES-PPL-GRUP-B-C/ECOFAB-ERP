@@ -29,4 +29,3 @@ class WasteListing extends Model
         return $this->belongsTo(WasteRecord::class);
     }
 }
-
