@@ -8,10 +8,27 @@
     />
 
     <x-card>
-        <x-empty-state
-            title="Modul Listing Bursa Limbah (FR-23)"
-            description="Fitur modul ini sedang dalam tahap pengembangan oleh anggota tim pada branch fitur terkait."
-        />
+        @if ($listings->isEmpty())
+            <x-empty-state title="Belum ada listing" description="Listing limbah produksi akan muncul di sini setelah dibuat." />
+        @else
+            <div class="overflow-x-auto">
+                <table class="min-w-full text-sm text-left">
+                    <thead><tr class="border-b"><th class="p-3">ID</th><th class="p-3">Kategori</th><th class="p-3">Berat tersedia</th><th class="p-3">Harga per kg</th><th class="p-3">Status</th></tr></thead>
+                    <tbody>
+                        @foreach ($listings as $listing)
+                            <tr class="border-b">
+                                <td class="p-3">{{ $listing->id }}</td>
+                                <td class="p-3">{{ $listing->category }}</td>
+                                <td class="p-3">{{ $listing->available_weight }}</td>
+                                <td class="p-3">{{ $listing->price_per_kg }}</td>
+                                <td class="p-3">{{ $listing->status }}</td>
+                            </tr>
+                        @endforeach
+                    </tbody>
+                </table>
+            </div>
+            <div class="mt-4">{{ $listings->links() }}</div>
+        @endif
     </x-card>
 </div>
 @endsection

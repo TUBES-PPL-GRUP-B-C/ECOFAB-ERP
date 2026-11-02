@@ -22,3 +22,16 @@
 Homestead.json
 Homestead.yaml
 Thumbs.db
+
+
+# ===================================
+# Zhafir
+# ===================================
+/prd/
+/daily/
+/AGENTS.md
+/docs/agents.md
+/docs/current_day.md
+/docs/index.md
+/docs/progress.md
+/docs/start_here.md
