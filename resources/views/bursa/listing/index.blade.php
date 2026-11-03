@@ -5,7 +5,13 @@
     <x-page-header
         title="Listing Bursa Limbah (FR-23)"
         subtitle="Daftar limbah siap jual"
-    />
+    >
+        @can('bursa.create')
+            <x-slot:actions>
+                <a href="{{ route('bursa.listing.create') }}" class="rounded-lg bg-brand-800 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-900">Tambah listing</a>
+            </x-slot:actions>
+        @endcan
+    </x-page-header>
 
     <x-card>
         @if ($listings->isEmpty())

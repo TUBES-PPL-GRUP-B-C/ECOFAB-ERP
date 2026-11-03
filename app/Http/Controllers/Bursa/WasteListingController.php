@@ -24,7 +24,11 @@ class WasteListingController extends Controller
 
     public function create(): View
     {
-        abort(501, 'Form listing belum tersedia pada irisan awal FR-23.');
+        $wasteRecordIds = Schema::hasTable('waste_records')
+            ? DB::table('waste_records')->orderBy('id')->pluck('id')
+            : collect();
+
+        return view('bursa.listing.create', compact('wasteRecordIds'));
     }
 
     public function store(Request $request): RedirectResponse
@@ -109,7 +113,7 @@ class WasteListingController extends Controller
             'category' => ['required', 'string', 'max:255'],
             'price_per_kg' => ['required', 'numeric', 'min:0', 'max:9999999999999.99', 'decimal:0,2'],
             'available_weight' => ['required', 'numeric', 'gt:0', 'max:999999999.999', 'decimal:0,3'],
-            'photo' => ['sometimes', 'nullable', 'image', 'mimes:jpeg,png,webp', 'max:2048'],
+            'photo' => ['sometimes', 'nullable', 'image', 'mimes:jpeg,png,webp', 'extensions:jpg,jpeg,png,webp', 'max:2048'],
         ];
     }
 
