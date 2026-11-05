@@ -104,4 +104,3 @@ class DepartmentTest extends TestCase
         $this->actingAs($hrUser)->get('/hr/departemen')->assertOk();
     }
 }
-
