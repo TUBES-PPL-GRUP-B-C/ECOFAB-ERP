@@ -6,7 +6,9 @@ use App\Models\Department;
 use App\Models\User;
 use Database\Seeders\RolePermissionSeeder;
 use Illuminate\Database\QueryException;
+use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Tests\TestCase;
 
@@ -91,16 +93,167 @@ class DepartmentTest extends TestCase
         $this->assertSame('SDM & Organisasi', $filteredResults->first()->name);
     }
 
-    public function test_department_index_route_requires_hr_view_permission(): void
+    public function test_department_routes_require_authentication_and_permissions(): void
     {
+        $department = Department::create([
+            'code' => 'DEP-HR',
+            'name' => 'SDM & Organisasi',
+        ]);
+
         $this->get('/hr/departemen')->assertRedirect('/login');
+        $this->get('/hr/departemen/create')->assertRedirect('/login');
+        $this->post('/hr/departemen', [])->assertRedirect('/login');
 
         $unauthorizedUser = User::factory()->create();
         $unauthorizedUser->assignRole('penjualan');
         $this->actingAs($unauthorizedUser)->get('/hr/departemen')->assertForbidden();
+        $this->get('/hr/departemen/create')->assertForbidden();
+        $this->post('/hr/departemen', [])->assertForbidden();
 
-        $hrUser = User::factory()->create();
-        $hrUser->assignRole('hr');
-        $this->actingAs($hrUser)->get('/hr/departemen')->assertOk();
+        $viewer = User::factory()->create();
+        $viewer->givePermissionTo('hr.view');
+        $this->actingAs($viewer)->get('/hr/departemen')->assertOk();
+        $this->get("/hr/departemen/{$department->id}")->assertOk();
+        $this->get('/hr/departemen/create')->assertForbidden();
+        $this->post('/hr/departemen', [
+            'code' => 'DEP-NEW',
+            'name' => 'Baru',
+        ])->assertForbidden();
+        $this->get("/hr/departemen/{$department->id}/edit")->assertForbidden();
+        $this->put("/hr/departemen/{$department->id}", [
+            'code' => 'DEP-HR',
+            'name' => 'Ubah',
+        ])->assertForbidden();
+        $this->delete("/hr/departemen/{$department->id}")->assertForbidden();
+    }
+
+    public function test_authorized_user_can_create_view_search_update_and_delete_department(): void
+    {
+        $hrUser = $this->hrUser();
+        $this->actingAs($hrUser);
+
+        $this->get('/hr/departemen/create')->assertOk()
+            ->assertSee('Tambah Departemen');
+
+        $this->post('/hr/departemen', [
+            'code' => 'DEP-QC',
+            'name' => 'Kontrol Kualitas',
+            'description' => 'Pemeriksaan mutu produk sirkular.',
+        ])->assertRedirect('/hr/departemen');
+
+        $department = Department::where('code', 'DEP-QC')->firstOrFail();
+
+        $this->get('/hr/departemen?cari=Kualitas')->assertOk()
+            ->assertSee('DEP-QC')
+            ->assertSee('Kontrol Kualitas');
+
+        $this->get("/hr/departemen/{$department->id}")->assertOk()
+            ->assertSee('DEP-QC')
+            ->assertSee('Pemeriksaan mutu produk sirkular.');
+
+        $this->get("/hr/departemen/{$department->id}/edit")->assertOk()
+            ->assertSee('value="DEP-QC"', false);
+
+        $this->put("/hr/departemen/{$department->id}", [
+            'code' => 'DEP-QA',
+            'name' => 'Jaminan Mutu',
+            'description' => 'Audit kualitas dan standar lingkungan.',
+        ])->assertRedirect('/hr/departemen');
+
+        $this->assertDatabaseHas('departments', [
+            'id' => $department->id,
+            'code' => 'DEP-QA',
+            'name' => 'Jaminan Mutu',
+        ]);
+
+        $this->delete("/hr/departemen/{$department->id}")
+            ->assertRedirect('/hr/departemen');
+
+        $this->assertDatabaseMissing('departments', [
+            'id' => $department->id,
+        ]);
+    }
+
+    public function test_store_and_update_validate_required_fields_and_unique_code(): void
+    {
+        $this->actingAs($this->hrUser());
+
+        $first = Department::create([
+            'code' => 'DEP-01',
+            'name' => 'Departemen Satu',
+        ]);
+        $second = Department::create([
+            'code' => 'DEP-02',
+            'name' => 'Departemen Dua',
+        ]);
+
+        $this->from('/hr/departemen/create')
+            ->post('/hr/departemen', [
+                'code' => '',
+                'name' => '',
+            ])
+            ->assertRedirect('/hr/departemen/create')
+            ->assertSessionHasErrors(['code', 'name']);
+
+        $this->from('/hr/departemen/create')
+            ->post('/hr/departemen', [
+                'code' => 'DEP-01',
+                'name' => 'Duplikat Kode',
+            ])
+            ->assertRedirect('/hr/departemen/create')
+            ->assertSessionHasErrors(['code']);
+
+        $this->put("/hr/departemen/{$second->id}", [
+            'code' => 'DEP-01',
+            'name' => 'Konflik Kode',
+        ])->assertSessionHasErrors(['code']);
+
+        $this->put("/hr/departemen/{$first->id}", [
+            'code' => 'DEP-01',
+            'name' => 'Departemen Satu Diperbarui',
+            'description' => 'Tetap memakai kode yang sama.',
+        ])->assertRedirect('/hr/departemen');
+
+        $this->assertDatabaseHas('departments', [
+            'id' => $first->id,
+            'name' => 'Departemen Satu Diperbarui',
+        ]);
+    }
+
+    public function test_department_referenced_by_employees_cannot_be_deleted(): void
+    {
+        $this->actingAs($this->hrUser());
+
+        $department = Department::create([
+            'code' => 'DEP-PROD',
+            'name' => 'Produksi Sirkular',
+        ]);
+
+        Schema::create('employees', function (Blueprint $table) {
+            $table->id();
+            $table->unsignedBigInteger('department_id');
+            $table->string('name')->nullable();
+        });
+
+        DB::table('employees')->insert([
+            'id' => 1,
+            'department_id' => $department->id,
+            'name' => 'Karyawan Uji',
+        ]);
+
+        $this->delete("/hr/departemen/{$department->id}")
+            ->assertStatus(409);
+
+        $this->assertDatabaseHas('departments', [
+            'id' => $department->id,
+        ]);
+    }
+
+    private function hrUser(): User
+    {
+        $user = User::factory()->create();
+        $user->assignRole('hr');
+
+        return $user;
     }
 }
