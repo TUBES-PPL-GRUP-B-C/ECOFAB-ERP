@@ -28,7 +28,11 @@ class WasteListingTest extends TestCase
     {
         $this->get('/bursa/listing')->assertRedirect('/login');
         $this->get('/bursa/listing/create')->assertRedirect('/login');
+        $this->get('/bursa/listing/1')->assertRedirect('/login');
+        $this->get('/bursa/listing/1/edit')->assertRedirect('/login');
         $this->post('/bursa/listing', [])->assertRedirect('/login');
+        $this->put('/bursa/listing/1', [])->assertRedirect('/login');
+        $this->delete('/bursa/listing/1')->assertRedirect('/login');
 
         $user = User::factory()->create();
         $user->assignRole('produksi');
@@ -154,6 +158,133 @@ class WasteListingTest extends TestCase
         $this->assertDatabaseHas('waste_listings', ['id' => $listing->id, 'category' => 'Rotan']);
         $this->delete("/bursa/listing/{$listing->id}")->assertRedirect('/bursa/listing');
         $this->assertDatabaseCount('waste_listings', 0);
+    }
+
+    public function test_index_and_detail_display_saved_values_and_respect_view_permission(): void
+    {
+        $this->createWasteRecordFixture();
+        $listing = WasteListing::create($this->attributes());
+        $viewer = User::factory()->create();
+        $viewer->givePermissionTo('bursa.view');
+
+        $this->actingAs($viewer)->get('/bursa/listing')->assertOk()
+            ->assertSee('Kayu')->assertSee('5.000')
+            ->assertSee(route('bursa.listing.show', $listing))
+            ->assertDontSee(route('bursa.listing.edit', $listing));
+        $this->get("/bursa/listing/{$listing->id}")->assertOk()
+            ->assertSee('Kayu')->assertSee('1000.00')->assertSee('Limbah produksi');
+        $this->get('/bursa/listing/999')->assertNotFound();
+        $this->get("/bursa/listing/{$listing->id}/edit")->assertForbidden();
+    }
+
+    public function test_edit_shows_saved_values_and_old_input_and_updates_valid_data(): void
+    {
+        $this->createWasteRecordFixture();
+        $listing = WasteListing::create($this->attributes());
+        $this->actingAs($this->commercialUser());
+
+        $this->get("/bursa/listing/{$listing->id}/edit")->assertOk()
+            ->assertSee('value="1" selected', false)
+            ->assertSee('value="Kayu"', false)
+            ->assertSee('value="1000.00"', false)
+            ->assertSee('value="5.000"', false);
+
+        $this->from("/bursa/listing/{$listing->id}/edit")
+            ->put("/bursa/listing/{$listing->id}", array_merge($this->attributes(), [
+                'category' => 'Rotan', 'available_weight' => -1,
+            ]))->assertRedirect("/bursa/listing/{$listing->id}/edit")
+            ->assertSessionHasErrors('available_weight');
+        $this->get("/bursa/listing/{$listing->id}/edit")->assertSee('value="Rotan"', false);
+        $this->assertDatabaseHas('waste_listings', ['id' => $listing->id, 'category' => 'Kayu']);
+
+        $this->put("/bursa/listing/{$listing->id}", array_merge($this->attributes(), [
+            'category' => 'Rotan', 'price_per_kg' => '1250.50', 'available_weight' => '3.250',
+            'status' => 'published',
+        ]))->assertRedirect('/bursa/listing');
+        $this->assertDatabaseHas('waste_listings', [
+            'id' => $listing->id, 'category' => 'Rotan', 'price_per_kg' => '1250.50',
+            'available_weight' => '3.250', 'status' => 'draft',
+        ]);
+    }
+
+    public function test_replacing_photo_keeps_old_file_on_invalid_input_and_removes_it_on_success(): void
+    {
+        $this->createWasteRecordFixture();
+        Storage::fake('public');
+        $this->actingAs($this->commercialUser());
+        $this->post('/bursa/listing', array_merge($this->attributes(), [
+            'photo' => UploadedFile::fake()->image('first.jpg'),
+        ]))->assertRedirect('/bursa/listing');
+        $listing = WasteListing::firstOrFail();
+        $oldPhoto = $listing->photo_path;
+
+        $this->put("/bursa/listing/{$listing->id}", array_merge($this->attributes(), [
+            'photo' => UploadedFile::fake()->image('too-big.png')->size(2049),
+        ]))->assertSessionHasErrors('photo');
+        Storage::disk('public')->assertExists($oldPhoto);
+        $this->assertSame($oldPhoto, $listing->fresh()->photo_path);
+
+        $this->put("/bursa/listing/{$listing->id}", array_merge($this->attributes(), [
+            'photo' => UploadedFile::fake()->image('replacement.png'),
+        ]))->assertRedirect('/bursa/listing');
+        $newPhoto = $listing->fresh()->photo_path;
+        $this->assertNotSame($oldPhoto, $newPhoto);
+        Storage::disk('public')->assertMissing($oldPhoto);
+        Storage::disk('public')->assertExists($newPhoto);
+        $this->get("/bursa/listing/{$listing->id}")->assertSee(Storage::disk('public')->url($newPhoto));
+    }
+
+    public function test_delete_blocks_existing_orders_and_cleans_only_managed_photo(): void
+    {
+        $this->createWasteRecordFixture();
+        Storage::fake('public');
+        $this->actingAs($this->commercialUser());
+        $this->post('/bursa/listing', array_merge($this->attributes(), [
+            'photo' => UploadedFile::fake()->image('ordered.jpg'),
+        ]))->assertRedirect('/bursa/listing');
+        $listing = WasteListing::firstOrFail();
+        $photo = $listing->photo_path;
+        Schema::create('waste_orders', function (Blueprint $table) {
+            $table->id();
+            $table->foreignId('waste_listing_id');
+        });
+        \Illuminate\Support\Facades\DB::table('waste_orders')->insert(['waste_listing_id' => $listing->id]);
+
+        $this->delete("/bursa/listing/{$listing->id}")->assertStatus(409);
+        $this->assertDatabaseHas('waste_listings', ['id' => $listing->id]);
+        Storage::disk('public')->assertExists($photo);
+
+        \Illuminate\Support\Facades\DB::table('waste_orders')->delete();
+        $this->delete("/bursa/listing/{$listing->id}")->assertRedirect('/bursa/listing');
+        $this->assertDatabaseMissing('waste_listings', ['id' => $listing->id]);
+        Storage::disk('public')->assertMissing($photo);
+    }
+
+    public function test_delete_refuses_unknown_order_schema(): void
+    {
+        $this->createWasteRecordFixture();
+        $listing = WasteListing::create($this->attributes());
+        Schema::create('waste_orders', function (Blueprint $table) {
+            $table->id();
+        });
+
+        $this->actingAs($this->commercialUser())
+            ->delete("/bursa/listing/{$listing->id}")->assertStatus(503);
+        $this->assertDatabaseHas('waste_listings', ['id' => $listing->id]);
+    }
+
+    public function test_delete_does_not_remove_unmanaged_photo_path(): void
+    {
+        $this->createWasteRecordFixture();
+        Storage::fake('public');
+        Storage::disk('public')->put('shared/report.png', 'keep this file');
+        $listing = WasteListing::create(array_merge($this->attributes(), [
+            'photo_path' => 'shared/report.png',
+        ]));
+
+        $this->actingAs($this->commercialUser())
+            ->delete("/bursa/listing/{$listing->id}")->assertRedirect('/bursa/listing');
+        Storage::disk('public')->assertExists('shared/report.png');
     }
 
     private function commercialUser(): User
