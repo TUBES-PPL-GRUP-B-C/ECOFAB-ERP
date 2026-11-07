@@ -55,12 +55,16 @@ class WasteListingController extends Controller
 
     public function show(WasteListing $listing): View
     {
-        abort(501, 'Halaman detail listing belum tersedia pada irisan awal FR-23.');
+        return view('bursa.listing.show', compact('listing'));
     }
 
     public function edit(WasteListing $listing): View
     {
-        abort(501, 'Form edit listing belum tersedia pada irisan awal FR-23.');
+        $wasteRecordIds = Schema::hasTable('waste_records')
+            ? DB::table('waste_records')->orderBy('id')->pluck('id')
+            : collect();
+
+        return view('bursa.listing.edit', compact('listing', 'wasteRecordIds'));
     }
 
     public function update(Request $request, WasteListing $listing): RedirectResponse
@@ -83,7 +87,7 @@ class WasteListingController extends Controller
             throw $exception;
         }
 
-        if (isset($attributes['photo_path']) && $oldPhoto) {
+        if (isset($attributes['photo_path']) && $this->isManagedPhoto($oldPhoto)) {
             Storage::disk('public')->delete($oldPhoto);
         }
 
@@ -92,18 +96,34 @@ class WasteListingController extends Controller
 
     public function destroy(WasteListing $listing): RedirectResponse
     {
-        // FR-25 owns waste_orders; keep the listing while orders reference it.
-        if (Schema::hasTable('waste_orders') && DB::table('waste_orders')->where('waste_listing_id', $listing->id)->exists()) {
-            abort(409, 'Listing yang memiliki order tidak dapat dihapus.');
-        }
+        $photoPath = DB::transaction(function () use ($listing) {
+            $listing = WasteListing::query()->lockForUpdate()->findOrFail($listing->id);
 
-        $listing->delete();
+            // FR-25 owns waste_orders; block deletion if its schema cannot be checked safely.
+            if (Schema::hasTable('waste_orders')) {
+                if (! Schema::hasColumn('waste_orders', 'waste_listing_id')) {
+                    throw new HttpException(503, 'Relasi order limbah belum dapat diverifikasi.');
+                }
+                if (DB::table('waste_orders')->where('waste_listing_id', $listing->id)->exists()) {
+                    throw new HttpException(409, 'Listing yang memiliki order tidak dapat dihapus.');
+                }
+            }
 
-        if ($listing->photo_path) {
-            Storage::disk('public')->delete($listing->photo_path);
+            $listing->delete();
+
+            return $listing->photo_path;
+        });
+
+        if ($this->isManagedPhoto($photoPath)) {
+            Storage::disk('public')->delete($photoPath);
         }
 
         return redirect()->route('bursa.listing.index')->with('success', 'Listing berhasil dihapus.');
+    }
+
+    private function isManagedPhoto(?string $path): bool
+    {
+        return $path !== null && preg_match('~^waste-listings/[A-Za-z0-9_-]+\.(?:jpg|jpeg|png|webp)$~i', $path) === 1;
     }
 
     private function rules(): array
