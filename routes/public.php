@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Bursa\PublicWasteCatalogController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -11,13 +12,8 @@ use Illuminate\Support\Facades\Route;
 */
 
 Route::prefix('bursa/katalog')->name('public.bursa.')->group(function () {
-    Route::get('/', function () {
-        return view('public.katalog_limbah');
-    })->name('index');
-
-    Route::get('/{id}', function ($id) {
-        return view('public.katalog_detail', compact('id'));
-    })->name('show');
+    Route::get('/', [PublicWasteCatalogController::class, 'index'])->name('index');
+    Route::get('/{id}', [PublicWasteCatalogController::class, 'show'])->whereNumber('id')->name('show');
 });
 
 Route::prefix('passport')->name('public.passport.')->group(function () {
