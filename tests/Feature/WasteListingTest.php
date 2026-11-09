@@ -54,6 +54,56 @@ class WasteListingTest extends TestCase
         $this->assertDatabaseCount('waste_listings', 0);
     }
 
+    public function test_shared_roles_control_access_to_all_internal_listing_routes(): void
+    {
+        $this->createWasteRecordFixture();
+        $listing = WasteListing::create($this->attributes());
+
+        foreach (['admin', 'penjualan', 'hr', 'pembelian', 'gudang', 'produksi'] as $role) {
+            $user = User::factory()->create();
+            $user->assignRole($role);
+            $this->actingAs($user);
+
+            foreach (['/bursa/listing', '/bursa/listing/create', "/bursa/listing/{$listing->id}", "/bursa/listing/{$listing->id}/edit"] as $url) {
+                $response = $this->get($url);
+                if (in_array($role, ['admin', 'penjualan'], true)) {
+                    $response->assertOk();
+                } else {
+                    $response->assertForbidden();
+                }
+            }
+
+            if (! in_array($role, ['admin', 'penjualan'], true)) {
+                $this->post('/bursa/listing', $this->attributes())->assertForbidden();
+                $this->put("/bursa/listing/{$listing->id}", $this->attributes())->assertForbidden();
+                $this->delete("/bursa/listing/{$listing->id}")->assertForbidden();
+            }
+        }
+
+        $this->assertDatabaseHas('waste_listings', ['id' => $listing->id]);
+    }
+
+    public function test_index_uses_shared_layout_flash_and_pagination_without_duplicate_messages(): void
+    {
+        $this->createWasteRecordFixture();
+        for ($number = 1; $number <= 11; $number++) {
+            WasteListing::create(array_merge($this->attributes(), ['category' => "Kategori uji {$number}"]));
+        }
+
+        $message = 'Pesan sukses listing untuk audit';
+        $response = $this->actingAs($this->commercialUser())
+            ->withSession(['success' => $message])->get('/bursa/listing');
+        $response->assertOk()->assertSee('id="sidebar"', false)
+            ->assertSee('Menampilkan')->assertSee('sampai')->assertSee('dari')
+            ->assertSee('page=2', false)
+            ->assertViewHas('listings', fn ($listings) => $listings->count() === 10);
+        $this->assertSame(1, substr_count($response->getContent(), $message));
+
+        $this->get('/bursa/listing?page=2')->assertOk()
+            ->assertSee('Kategori uji')
+            ->assertViewHas('listings', fn ($listings) => $listings->count() === 1);
+    }
+
     public function test_create_form_shows_available_reference_and_old_values_after_validation_failure(): void
     {
         $this->createWasteRecordFixture();

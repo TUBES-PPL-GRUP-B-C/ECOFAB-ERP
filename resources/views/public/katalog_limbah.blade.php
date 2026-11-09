@@ -12,26 +12,21 @@
         </p>
     </div>
 
-    <!-- Kotak Info / Pencarian -->
-    <div class="bg-white rounded-2xl p-5 border border-slate-200/80 shadow-2xs">
-        <div class="flex flex-col sm:flex-row gap-3">
-            <input 
-                type="text" 
-                placeholder="Cari jenis limbah (serbuk, offcut rotan, dsb.)..." 
-                class="flex-1 px-4 py-2 text-sm rounded-xl border border-slate-300 focus:border-brand-600 focus:ring-2 focus:ring-brand-500/20"
-            >
-            <button class="px-5 py-2 rounded-xl bg-brand-900 text-white font-semibold text-xs shadow-xs hover:bg-brand-950 transition-colors">
-                Cari Limbah
-            </button>
-        </div>
-    </div>
-
-    <!-- Empty State / Placeholder Listing -->
-    <x-card>
-        <x-empty-state
-            title="Katalog Publik Bursa Limbah (FR-24)"
-            description="Katalog publik ini akan menampilkan data listing limbah produksi siap jual yang terhubung dengan siklus Work Order."
-        />
-    </x-card>
+    @forelse ($listings as $listing)
+        <x-card>
+            <h2 class="font-semibold text-slate-900">
+                <a href="{{ route('public.bursa.show', $listing->id) }}" class="hover:underline">{{ $listing->category }}</a>
+            </h2>
+            <p class="mt-2 text-sm">Berat tersedia: {{ $listing->available_weight }} kg</p>
+            <p class="text-sm">Harga per kg: Rp {{ $listing->price_per_kg }}</p>
+        </x-card>
+    @empty
+        <x-card>
+            <x-empty-state
+                title="Belum ada limbah tersedia"
+                description="Silakan kunjungi katalog kembali untuk melihat ketersediaan limbah."
+            />
+        </x-card>
+    @endforelse
 </div>
 @endsection
