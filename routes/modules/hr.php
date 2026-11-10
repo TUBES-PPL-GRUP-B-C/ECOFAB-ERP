@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Hr\DepartmentController;
+use App\Http\Controllers\Hr\EmployeeController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -28,9 +29,18 @@ Route::middleware(['auth', 'permission:hr.view'])->group(function () {
     Route::delete('/departemen/{departemen}', [DepartmentController::class, 'destroy'])
         ->middleware('permission:hr.delete')->name('hr.departemen.destroy');
 
-    Route::get('/karyawan', function () {
-        return view('hr.karyawan.index');
-    })->name('hr.karyawan.index');
+    Route::get('/karyawan', [EmployeeController::class, 'index'])->name('hr.karyawan.index');
+    Route::get('/karyawan/create', [EmployeeController::class, 'create'])
+        ->middleware('permission:hr.create')->name('hr.karyawan.create');
+    Route::post('/karyawan', [EmployeeController::class, 'store'])
+        ->middleware('permission:hr.create')->name('hr.karyawan.store');
+    Route::get('/karyawan/{karyawan}', [EmployeeController::class, 'show'])->name('hr.karyawan.show');
+    Route::get('/karyawan/{karyawan}/edit', [EmployeeController::class, 'edit'])
+        ->middleware('permission:hr.update')->name('hr.karyawan.edit');
+    Route::put('/karyawan/{karyawan}', [EmployeeController::class, 'update'])
+        ->middleware('permission:hr.update')->name('hr.karyawan.update');
+    Route::delete('/karyawan/{karyawan}', [EmployeeController::class, 'destroy'])
+        ->middleware('permission:hr.delete')->name('hr.karyawan.destroy');
 
     Route::get('/absensi', function () {
         return view('hr.absensi.index');
