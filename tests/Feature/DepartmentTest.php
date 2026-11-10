@@ -229,16 +229,24 @@ class DepartmentTest extends TestCase
             'name' => 'Produksi Sirkular',
         ]);
 
-        Schema::create('employees', function (Blueprint $table) {
-            $table->id();
-            $table->unsignedBigInteger('department_id');
-            $table->string('name')->nullable();
-        });
+        if (! Schema::hasTable('employees')) {
+            Schema::create('employees', function (Blueprint $table) {
+                $table->id();
+                $table->unsignedBigInteger('department_id');
+                $table->string('employee_code')->nullable();
+                $table->string('name')->nullable();
+                $table->string('position')->nullable();
+                $table->date('join_date')->nullable();
+            });
+        }
 
         DB::table('employees')->insert([
             'id' => 1,
             'department_id' => $department->id,
+            'employee_code' => 'EMP-UJI-01',
             'name' => 'Karyawan Uji',
+            'position' => 'Operator Produksi',
+            'join_date' => '2026-11-09',
         ]);
 
         $this->delete("/hr/departemen/{$department->id}")
