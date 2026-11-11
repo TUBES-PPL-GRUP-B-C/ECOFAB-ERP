@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\WasteListing;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
 
 class PublicWasteCatalogTest extends TestCase
@@ -89,7 +90,7 @@ class PublicWasteCatalogTest extends TestCase
     {
         $listing = $this->listing('published', 5);
         $listing->update(['category' => '<script>alert("test")</script>']);
-        $publicFields = ['id', 'category', 'price_per_kg', 'available_weight'];
+        $publicFields = ['id', 'category', 'price_per_kg', 'available_weight', 'photo_path'];
 
         $this->get('/bursa/katalog')->assertOk()
             ->assertViewHas('listings', function ($listings) use ($publicFields) {
@@ -140,6 +141,97 @@ class PublicWasteCatalogTest extends TestCase
         $listing->status = 'draft';
         $listing->save();
         $this->get($url)->assertNotFound();
+    }
+
+    public function test_search_and_exact_category_filter_can_be_combined_by_guests(): void
+    {
+        $wood = $this->listing('published', 5);
+        $wood->update(['category' => 'Potongan kayu']);
+        $dust = $this->listing('published', 5);
+        $dust->update(['category' => 'Serbuk kayu']);
+        $rattan = $this->listing('published', 5);
+        $rattan->update(['category' => 'Rotan']);
+
+        $this->get('/bursa/katalog?cari=%20kayu%20')->assertOk()
+            ->assertViewHas('listings', fn ($items) => $items->modelKeys() === [$dust->id, $wood->id])
+            ->assertSee('value="kayu"', false);
+        $this->get('/bursa/katalog?'.http_build_query(['cari' => 'kayu', 'category' => 'Potongan kayu']))
+            ->assertOk()
+            ->assertViewHas('listings', fn ($items) => $items->modelKeys() === [$wood->id])
+            ->assertSee('<option value="Potongan kayu" selected', false)
+            ->assertSee('Reset pencarian');
+        $this->get('/bursa/katalog?category=kayu')->assertOk()
+            ->assertViewHas('listings', fn ($items) => $items->isEmpty())
+            ->assertSee('Tidak ada limbah yang cocok');
+        $this->get('/bursa/katalog?category=Rotan')->assertOk()
+            ->assertViewHas('listings', fn ($items) => $items->modelKeys() === [$rattan->id]);
+        $this->get('/bursa/katalog?cari=&category=')->assertOk()
+            ->assertViewHas('listings', fn ($items) => $items->count() === 3)
+            ->assertDontSee('Reset pencarian');
+        $this->assertGuest();
+    }
+
+    public function test_category_options_are_unique_and_only_use_public_available_listings(): void
+    {
+        foreach ([['published', 5, 'Kayu'], ['published', 2, 'Kayu'], ['published', 1, 'Rotan'],
+            ['draft', 5, 'Kategori rahasia'], ['withdrawn', 5, 'Ditarik'],
+            ['published', 0, 'Stok kosong'], ['published', -1, 'Stok negatif']] as [$status, $weight, $category]) {
+            $this->listing($status, $weight)->update(['category' => $category]);
+        }
+
+        $this->get('/bursa/katalog?cari=Rotan')->assertOk()
+            ->assertViewHas('categories', fn ($items) => $items->all() === ['Kayu', 'Rotan'])
+            ->assertViewHas('listings', fn ($items) => $items->count() === 1);
+        $this->get('/bursa/katalog?'.http_build_query(['cari' => 'Kategori', 'category' => 'Kategori rahasia']))
+            ->assertOk()->assertViewHas('listings', fn ($items) => $items->isEmpty());
+        $this->get('/bursa/katalog?cari=%25')->assertOk()
+            ->assertViewHas('listings', fn ($items) => $items->count() === 3)
+            ->assertDontSee('Kategori rahasia')->assertDontSee('Stok kosong');
+    }
+
+    public function test_search_for_zero_is_not_treated_as_an_empty_search(): void
+    {
+        $match = $this->listing('published', 5);
+        $match->update(['category' => 'Kayu 0']);
+        $this->listing('published', 5)->update(['category' => 'Rotan']);
+
+        $this->get('/bursa/katalog?cari=0')->assertOk()
+            ->assertViewHas('listings', fn ($items) => $items->modelKeys() === [$match->id]);
+    }
+
+    public function test_search_input_is_validated_and_escaped_without_sql_injection(): void
+    {
+        $this->listing('published', 5);
+        foreach (['cari', 'category'] as $field) {
+            foreach ([['invalid'], str_repeat('a', 256)] as $invalid) {
+                $this->getJson('/bursa/katalog?'.http_build_query([$field => $invalid]))
+                    ->assertUnprocessable()->assertJsonValidationErrors($field);
+            }
+        }
+
+        $this->get('/bursa/katalog?'.http_build_query(['cari' => "' OR 1=1 --"]))
+            ->assertOk()->assertViewHas('listings', fn ($items) => $items->isEmpty());
+        $script = '<script>alert("search")</script>';
+        $this->get('/bursa/katalog?'.http_build_query(['cari' => $script]))
+            ->assertOk()->assertSee($script)->assertDontSee($script, false)
+            ->assertSee('Tidak ada limbah yang cocok');
+    }
+
+    public function test_detail_displays_public_photo_and_fallback_without_internal_order_link(): void
+    {
+        $listing = $this->listing('published', 5);
+        $url = route('public.bursa.show', $listing->id);
+        $this->get($url)->assertOk()->assertSee('Foto limbah belum tersedia.')
+            ->assertSee(route('public.bursa.index'), false)
+            ->assertDontSee(route('bursa.order.index'), false);
+
+        $listing->update(['photo_path' => 'waste-listings/sample.jpg']);
+        $this->get($url)->assertOk()
+            ->assertSee(Storage::disk('public')->url($listing->photo_path), false)
+            ->assertSee('Foto limbah '.$listing->category)
+            ->assertDontSee('Foto limbah belum tersedia.')
+            ->assertDontSee('waste_record_id')
+            ->assertDontSee(route('bursa.order.index'), false);
     }
 
     private function listing(string $status, string|int $weight): WasteListing
