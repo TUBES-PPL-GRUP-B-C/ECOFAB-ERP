@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Traits\Searchable;
 use Carbon\Carbon;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
@@ -44,6 +45,38 @@ class Attendance extends Model
     public function employee(): BelongsTo
     {
         return $this->belongsTo(Employee::class);
+    }
+
+    public function scopeDateRange(Builder $query, ?string $startDate, ?string $endDate): Builder
+    {
+        if ($startDate !== null && $startDate !== '') {
+            try {
+                $query->where('work_date', '>=', Carbon::parse($startDate)->toDateString());
+            } catch (\Throwable) {
+                // Ignore malformed date filter input.
+            }
+        }
+
+        if ($endDate !== null && $endDate !== '') {
+            try {
+                $query->where('work_date', '<=', Carbon::parse($endDate)->toDateString());
+            } catch (\Throwable) {
+                // Ignore malformed date filter input.
+            }
+        }
+
+        return $query;
+    }
+
+    public function scopeForMonth(Builder $query, ?string $month): Builder
+    {
+        if ($month !== null && preg_match('/^\d{4}-(0[1-9]|1[0-2])$/', $month) === 1) {
+            $start = $month . '-01';
+            $end = Carbon::createFromFormat('Y-m-d', $start)->endOfMonth()->toDateString();
+            $query->whereBetween('work_date', [$start, $end]);
+        }
+
+        return $query;
     }
 
     public function getBadgeStatusAttribute(): string

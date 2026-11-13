@@ -9,6 +9,7 @@ use Carbon\Carbon;
 use Closure;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
 use Illuminate\Validation\Rule;
 use Illuminate\View\View;
 
@@ -17,16 +18,41 @@ class AttendanceController extends Controller
     public function index(Request $request): View
     {
         $searchColumns = ['shift', 'status', 'notes', 'employee.employee_code', 'employee.name'];
+        $startDate = $request->input('tanggal_mulai', $request->input('start_date'));
+        $endDate = $request->input('tanggal_selesai', $request->input('end_date'));
+        $requestedMonth = $request->input('bulan', $request->input('month'));
 
         $attendances = Attendance::with(['employee.department'])
             ->search($request->cari, $searchColumns)
-            ->filter($request->only(['shift', 'status']))
+            ->filter($request->only(['employee_id', 'shift', 'status']))
+            ->dateRange($startDate, $endDate)
+            ->forMonth($requestedMonth)
             ->orderByDesc('work_date')
             ->orderByDesc('id')
             ->paginate(15)
             ->withQueryString();
 
-        return view('hr.absensi.index', compact('attendances'));
+        $recapMonth = $this->resolveRecapMonth($requestedMonth);
+        $monthlyRecap = $this->buildMonthlyRecap($recapMonth, $request->input('employee_id'), $startDate, $endDate);
+        $recapTotals = [
+            'hadir' => (int) $monthlyRecap->sum('hadir_count'),
+            'izin' => (int) $monthlyRecap->sum('izin_count'),
+            'sakit' => (int) $monthlyRecap->sum('sakit_count'),
+            'alpa' => (int) $monthlyRecap->sum('alpa_count'),
+            'total' => (int) $monthlyRecap->sum('total_count'),
+        ];
+
+        $employees = Employee::with('department')
+            ->orderBy('employee_code')
+            ->get();
+
+        return view('hr.absensi.index', compact(
+            'attendances',
+            'employees',
+            'monthlyRecap',
+            'recapTotals',
+            'recapMonth'
+        ));
     }
 
     public function create(): View
@@ -93,6 +119,71 @@ class AttendanceController extends Controller
         return redirect()
             ->route('hr.absensi.index')
             ->with('success', 'Data absensi berhasil dihapus.');
+    }
+
+    private function resolveRecapMonth(?string $requestedMonth): string
+    {
+        if ($requestedMonth !== null && preg_match('/^\d{4}-(0[1-9]|1[0-2])$/', $requestedMonth) === 1) {
+            return $requestedMonth;
+        }
+
+        $latestWorkDate = Attendance::query()->max('work_date');
+        if (is_string($latestWorkDate) && strlen($latestWorkDate) >= 7) {
+            return substr($latestWorkDate, 0, 7);
+        }
+
+        return Carbon::now()->format('Y-m');
+    }
+
+    private function buildMonthlyRecap(
+        string $recapMonth,
+        mixed $employeeId = null,
+        ?string $startDate = null,
+        ?string $endDate = null
+    ): Collection {
+        $recordsQuery = Attendance::query()->forMonth($recapMonth);
+
+        if ($employeeId !== null && $employeeId !== '') {
+            $recordsQuery->where('employee_id', $employeeId);
+        }
+
+        if (($startDate !== null && $startDate !== '') || ($endDate !== null && $endDate !== '')) {
+            $recordsQuery->dateRange($startDate, $endDate);
+        }
+
+        $grouped = $recordsQuery->get()->groupBy('employee_id');
+
+        $employeesQuery = Employee::with('department')->orderBy('employee_code');
+        if ($employeeId !== null && $employeeId !== '') {
+            $employeesQuery->where('id', $employeeId);
+        } else {
+            $employeesQuery->where(function ($query) use ($grouped) {
+                $query->where('status', 'active');
+                if ($grouped->isNotEmpty()) {
+                    $query->orWhereIn('id', $grouped->keys());
+                }
+            });
+        }
+
+        return $employeesQuery->get()->map(function (Employee $employee) use ($grouped) {
+            $items = $grouped->get($employee->id, collect());
+            $hadir = $items->where('status', 'hadir')->count();
+            $izin = $items->where('status', 'izin')->count();
+            $sakit = $items->where('status', 'sakit')->count();
+            $alpa = $items->where('status', 'alpa')->count();
+
+            return (object) [
+                'employee_id' => $employee->id,
+                'employee_code' => $employee->employee_code,
+                'name' => $employee->name,
+                'department_name' => $employee->department?->name ?? '—',
+                'hadir_count' => $hadir,
+                'izin_count' => $izin,
+                'sakit_count' => $sakit,
+                'alpa_count' => $alpa,
+                'total_count' => $hadir + $izin + $sakit + $alpa,
+            ];
+        });
     }
 
     private function rules(Request $request, ?int $ignoreId = null): array

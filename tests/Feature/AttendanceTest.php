@@ -312,6 +312,161 @@ class AttendanceTest extends TestCase
         ]);
     }
 
+    public function test_attendance_date_range_month_and_employee_filters_work(): void
+    {
+        $this->actingAs($this->hrUser());
+
+        $firstEmployee = $this->createEmployee('EMP-FLT-01', 'Rangga Pratama');
+        $secondEmployee = $this->createEmployee('EMP-FLT-02', 'Sinta Dewi');
+
+        Attendance::create([
+            'employee_id' => $firstEmployee->id,
+            'work_date' => '2026-10-25',
+            'shift' => 'Pagi',
+            'check_in' => '08:00',
+            'check_out' => '16:00',
+            'status' => 'hadir',
+            'notes' => 'Catatan Oktober',
+        ]);
+
+        Attendance::create([
+            'employee_id' => $firstEmployee->id,
+            'work_date' => '2026-11-05',
+            'shift' => 'Pagi',
+            'check_in' => '08:00',
+            'check_out' => '16:00',
+            'status' => 'hadir',
+            'notes' => 'Catatan Awal November',
+        ]);
+
+        Attendance::create([
+            'employee_id' => $secondEmployee->id,
+            'work_date' => '2026-11-12',
+            'shift' => 'Siang',
+            'check_in' => '14:00',
+            'check_out' => '22:00',
+            'status' => 'hadir',
+            'notes' => 'Catatan Pertengahan November',
+        ]);
+
+        Attendance::create([
+            'employee_id' => $secondEmployee->id,
+            'work_date' => '2026-11-25',
+            'shift' => 'Malam',
+            'status' => 'izin',
+            'notes' => 'Catatan Akhir November',
+        ]);
+
+        $rangeResponse = $this->get('/hr/absensi?tanggal_mulai=2026-11-01&tanggal_selesai=2026-11-15');
+        $rangeResponse->assertOk()
+            ->assertViewHas('attendances', fn ($paginator) => $paginator->total() === 2);
+
+        $monthResponse = $this->get('/hr/absensi?bulan=2026-11');
+        $monthResponse->assertOk()
+            ->assertViewHas('attendances', fn ($paginator) => $paginator->total() === 3);
+
+        $employeeResponse = $this->get("/hr/absensi?employee_id={$firstEmployee->id}&bulan=2026-11");
+        $employeeResponse->assertOk()
+            ->assertViewHas('attendances', fn ($paginator) => $paginator->total() === 1);
+    }
+
+    public function test_monthly_attendance_recap_calculates_per_employee_status_counts_accurately(): void
+    {
+        $this->actingAs($this->hrUser());
+
+        $andi = $this->createEmployee('EMP-REC-01', 'Andi Wijaya');
+        $bela = $this->createEmployee('EMP-REC-02', 'Bela Safitri');
+
+        // Catatan bulan Oktober (tidak boleh masuk rekap November 2026)
+        Attendance::create([
+            'employee_id' => $andi->id,
+            'work_date' => '2026-10-30',
+            'shift' => 'Pagi',
+            'check_in' => '08:00',
+            'check_out' => '16:00',
+            'status' => 'hadir',
+        ]);
+
+        // Andi pada November 2026: 3 hadir, 1 izin, 1 sakit, 1 alpa = 6 hari
+        foreach (['2026-11-02', '2026-11-03', '2026-11-04'] as $date) {
+            Attendance::create([
+                'employee_id' => $andi->id,
+                'work_date' => $date,
+                'shift' => 'Pagi',
+                'check_in' => '08:00',
+                'check_out' => '16:00',
+                'status' => 'hadir',
+            ]);
+        }
+        Attendance::create([
+            'employee_id' => $andi->id,
+            'work_date' => '2026-11-05',
+            'shift' => 'Pagi',
+            'status' => 'izin',
+        ]);
+        Attendance::create([
+            'employee_id' => $andi->id,
+            'work_date' => '2026-11-06',
+            'shift' => 'Pagi',
+            'status' => 'sakit',
+        ]);
+        Attendance::create([
+            'employee_id' => $andi->id,
+            'work_date' => '2026-11-07',
+            'shift' => 'Pagi',
+            'status' => 'alpa',
+        ]);
+
+        // Bela pada November 2026: 2 hadir, 0 izin, 1 sakit, 0 alpa = 3 hari
+        foreach (['2026-11-02', '2026-11-03'] as $date) {
+            Attendance::create([
+                'employee_id' => $bela->id,
+                'work_date' => $date,
+                'shift' => 'Siang',
+                'check_in' => '14:00',
+                'check_out' => '22:00',
+                'status' => 'hadir',
+            ]);
+        }
+        Attendance::create([
+            'employee_id' => $bela->id,
+            'work_date' => '2026-11-04',
+            'shift' => 'Siang',
+            'status' => 'sakit',
+        ]);
+
+        $response = $this->get('/hr/absensi?bulan=2026-11');
+        $response->assertOk()
+            ->assertSee('Rekapitulasi Absensi Bulanan per Karyawan')
+            ->assertSee('Andi Wijaya')
+            ->assertSee('Bela Safitri')
+            ->assertViewHas('recapMonth', '2026-11')
+            ->assertViewHas('recapTotals', [
+                'hadir' => 5,
+                'izin' => 1,
+                'sakit' => 2,
+                'alpa' => 1,
+                'total' => 9,
+            ])
+            ->assertViewHas('monthlyRecap', function ($recap) use ($andi, $bela) {
+                $andiRow = $recap->firstWhere('employee_id', $andi->id);
+                $belaRow = $recap->firstWhere('employee_id', $bela->id);
+
+                return $andiRow !== null
+                    && $andiRow->hadir_count === 3
+                    && $andiRow->izin_count === 1
+                    && $andiRow->sakit_count === 1
+                    && $andiRow->alpa_count === 1
+                    && $andiRow->total_count === 6
+                    && $belaRow !== null
+                    && $belaRow->hadir_count === 2
+                    && $belaRow->izin_count === 0
+                    && $belaRow->sakit_count === 1
+                    && $belaRow->alpa_count === 0
+                    && $belaRow->total_count === 3;
+            });
+    }
+
     private function createEmployee(
         string $code,
         string $name,
