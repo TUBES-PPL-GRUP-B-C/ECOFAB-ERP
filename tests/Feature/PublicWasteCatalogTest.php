@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\WasteListing;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
 
@@ -232,6 +233,97 @@ class PublicWasteCatalogTest extends TestCase
             ->assertDontSee('Foto limbah belum tersedia.')
             ->assertDontSee('waste_record_id')
             ->assertDontSee(route('bursa.order.index'), false);
+    }
+
+    public function test_guest_can_paginate_only_available_public_listings_without_duplicates(): void
+    {
+        $ids = [];
+        for ($index = 0; $index < 25; $index++) {
+            $ids[] = $this->listing('published', 5)->id;
+        }
+        foreach ([['draft', 5], ['withdrawn', 5], ['published', 0], ['published', -1]] as [$status, $weight]) {
+            $this->listing($status, $weight);
+        }
+
+        $expected = array_reverse($ids);
+        foreach ([1, 2, 3] as $page) {
+            $this->get('/bursa/katalog?page='.$page)->assertOk()
+                ->assertViewHas('listings', function ($items) use ($expected, $page) {
+                    $this->assertInstanceOf(LengthAwarePaginator::class, $items);
+                    $this->assertSame(25, $items->total());
+                    $this->assertSame(12, $items->perPage());
+                    $this->assertSame(3, $items->lastPage());
+                    $this->assertSame($page, $items->currentPage());
+                    $this->assertSame(array_slice($expected, ($page - 1) * 12, 12), $items->modelKeys());
+                    foreach ($items as $item) {
+                        $this->assertSame(
+                            ['id', 'category', 'price_per_kg', 'available_weight', 'photo_path'],
+                            array_keys($item->getAttributes()),
+                        );
+                    }
+
+                    return true;
+                })
+                ->assertSee('Menampilkan')->assertDontSee('Tidak ada limbah yang cocok');
+        }
+        $this->assertGuest();
+    }
+
+    public function test_pagination_links_keep_only_validated_search_and_category_and_filters_reset_page(): void
+    {
+        $ids = [];
+        for ($index = 0; $index < 13; $index++) {
+            $listing = $this->listing('published', 5);
+            $listing->update(['category' => 'Potongan kayu & rotan']);
+            $ids[] = $listing->id;
+        }
+        $this->listing('published', 5)->update(['category' => 'Serbuk kayu']);
+        $this->listing('draft', 5)->update(['category' => 'Potongan kayu & rotan']);
+        $filters = ['cari' => ' kayu ', 'category' => 'Potongan kayu & rotan', 'status' => 'draft', 'per_page' => 100];
+
+        $response = $this->get('/bursa/katalog?'.http_build_query($filters))->assertOk();
+        $paginator = $response->viewData('listings');
+        parse_str(parse_url($paginator->nextPageUrl(), PHP_URL_QUERY), $nextQuery);
+        $this->assertSame(['cari' => 'kayu', 'category' => 'Potongan kayu & rotan', 'page' => '2'], $nextQuery);
+        $response->assertSee($paginator->nextPageUrl())
+            ->assertViewHas('listings', fn ($items) => $items->total() === 13 && $items->count() === 12)
+            ->assertDontSee('name="page"', false);
+
+        $this->get($paginator->nextPageUrl())->assertOk()
+            ->assertViewHas('listings', fn ($items) => $items->modelKeys() === [$ids[0]] && $items->total() === 13)
+            ->assertSee('value="kayu"', false)
+            ->assertSee('<option value="Potongan kayu &amp; rotan" selected', false)
+            ->assertSee('Reset pencarian');
+        $this->get('/bursa/katalog?category=Serbuk+kayu')->assertOk()
+            ->assertViewHas('listings', fn ($items) => $items->currentPage() === 1 && $items->total() === 1)
+            ->assertDontSee('Menampilkan');
+        $this->get(route('public.bursa.index'))->assertOk()
+            ->assertViewHas('listings', fn ($items) => $items->currentPage() === 1 && $items->total() === 14);
+        $this->assertGuest();
+    }
+
+    public function test_page_input_rejects_invalid_values(): void
+    {
+        foreach ([['invalid'], 'abc', 0, -1, '1.5', '2147483648'] as $page) {
+            $this->getJson('/bursa/katalog?'.http_build_query(['page' => $page]))
+                ->assertUnprocessable()->assertJsonValidationErrors('page');
+        }
+        $this->get('/bursa/katalog?page=')->assertOk()
+            ->assertViewHas('listings', fn ($items) => $items->currentPage() === 1);
+    }
+
+    public function test_out_of_range_page_has_a_recovery_link_preserving_filters(): void
+    {
+        $this->listing('published', 5)->update(['category' => 'Kayu']);
+        $response = $this->get('/bursa/katalog?cari=Kayu&category=Kayu&page=99')->assertOk()
+            ->assertViewHas('listings', fn ($items) => $items->isEmpty() && $items->total() === 1)
+            ->assertSee('Halaman katalog tidak tersedia')
+            ->assertSee('Ke halaman pertama')
+            ->assertDontSee('Belum ada limbah tersedia')
+            ->assertDontSee('Tidak ada limbah yang cocok');
+        $this->get($response->viewData('listings')->url(1))->assertOk()
+            ->assertViewHas('listings', fn ($items) => $items->currentPage() === 1 && $items->total() === 1)
+            ->assertDontSee('Halaman katalog tidak tersedia');
     }
 
     private function listing(string $status, string|int $weight): WasteListing
