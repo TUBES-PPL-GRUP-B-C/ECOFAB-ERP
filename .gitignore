@@ -35,3 +35,15 @@ Thumbs.db
 /docs/index.md
 /docs/progress.md
 /docs/start_here.md
+
+# ===================================
+# Rifqi
+# ===================================
+/START_HERE.md
+/CURRENT_DAY.md
+/PROGRESS.md
+/INDEX.md
+/LOCAL_GIT_EXCLUDE.md
+/.agents/
+/docs/*.md
+
