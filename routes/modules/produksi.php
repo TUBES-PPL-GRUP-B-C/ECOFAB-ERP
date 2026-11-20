@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Produksi\WasteRecordController;
 use App\Http\Controllers\Produksi\WorkOrderController;
 use Illuminate\Support\Facades\Route;
 
@@ -42,7 +43,16 @@ Route::middleware(['auth', 'permission:produksi.view'])->group(function () {
     Route::post('/wo/{workOrder}/mulai', [WorkOrderController::class, 'start'])
         ->middleware('permission:wo.start')->name('produksi.wo.start');
 
-    Route::get('/limbah', function () {
-        return view('produksi.limbah.index');
-    })->name('produksi.limbah.index');
+    Route::get('/limbah', [WasteRecordController::class, 'index'])->name('produksi.limbah.index');
+    Route::get('/limbah/create', [WasteRecordController::class, 'create'])
+        ->middleware('permission:produksi.create')->name('produksi.limbah.create');
+    Route::post('/limbah', [WasteRecordController::class, 'store'])
+        ->middleware('permission:produksi.create')->name('produksi.limbah.store');
+    Route::get('/limbah/{wasteRecord}', [WasteRecordController::class, 'show'])->name('produksi.limbah.show');
+    Route::get('/limbah/{wasteRecord}/edit', [WasteRecordController::class, 'edit'])
+        ->middleware('permission:produksi.update')->name('produksi.limbah.edit');
+    Route::put('/limbah/{wasteRecord}', [WasteRecordController::class, 'update'])
+        ->middleware('permission:produksi.update')->name('produksi.limbah.update');
+    Route::delete('/limbah/{wasteRecord}', [WasteRecordController::class, 'destroy'])
+        ->middleware('permission:produksi.delete')->name('produksi.limbah.destroy');
 });

@@ -4,12 +4,14 @@ namespace App\Http\Controllers\Bursa;
 
 use App\Http\Controllers\Controller;
 use App\Models\WasteListing;
+use App\Models\WasteRecord;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 use Illuminate\View\View;
 use Symfony\Component\HttpKernel\Exception\HttpException;
 
@@ -25,7 +27,7 @@ class WasteListingController extends Controller
     public function create(): View
     {
         $wasteRecordIds = Schema::hasTable('waste_records')
-            ? DB::table('waste_records')->orderBy('id')->pluck('id')
+            ? DB::table('waste_records')->where('status', 'available')->orderBy('id')->pluck('id')
             : collect();
 
         return view('bursa.listing.create', compact('wasteRecordIds'));
@@ -42,7 +44,10 @@ class WasteListingController extends Controller
         }
 
         try {
-            WasteListing::create($attributes);
+            DB::transaction(function () use ($attributes) {
+                $this->lockWasteRecord($attributes);
+                WasteListing::create($attributes);
+            });
         } catch (\Throwable $exception) {
             if (isset($attributes['photo_path'])) {
                 Storage::disk('public')->delete($attributes['photo_path']);
@@ -61,7 +66,9 @@ class WasteListingController extends Controller
     public function edit(WasteListing $listing): View
     {
         $wasteRecordIds = Schema::hasTable('waste_records')
-            ? DB::table('waste_records')->orderBy('id')->pluck('id')
+            ? DB::table('waste_records')
+                ->where(fn ($query) => $query->where('status', 'available')->orWhere('id', $listing->waste_record_id))
+                ->orderBy('id')->pluck('id')
             : collect();
 
         return view('bursa.listing.edit', compact('listing', 'wasteRecordIds'));
@@ -72,14 +79,20 @@ class WasteListingController extends Controller
         $this->ensureWasteRecordsAvailable();
         $validated = $request->validate($this->rules());
         $attributes = collect($validated)->except('photo')->all();
-        $oldPhoto = $listing->photo_path;
 
         if ($request->hasFile('photo')) {
             $attributes['photo_path'] = $request->file('photo')->store('waste-listings', 'public');
         }
 
         try {
-            $listing->update($attributes);
+            $oldPhoto = DB::transaction(function () use ($listing, $attributes) {
+                $locked = WasteListing::query()->lockForUpdate()->findOrFail($listing->id);
+                $this->lockWasteRecord($attributes, $locked->waste_record_id);
+                $oldPhoto = $locked->photo_path;
+                $locked->update($attributes);
+
+                return $oldPhoto;
+            });
         } catch (\Throwable $exception) {
             if (isset($attributes['photo_path'])) {
                 Storage::disk('public')->delete($attributes['photo_path']);
@@ -119,6 +132,28 @@ class WasteListingController extends Controller
         }
 
         return redirect()->route('bursa.listing.index')->with('success', 'Listing berhasil dihapus.');
+    }
+
+    private function lockWasteRecord(array $attributes, ?int $existingWasteRecordId = null): void
+    {
+        // Share the parent lock with FR-22 update/delete, including stale requests.
+        $wasteRecord = WasteRecord::query()->lockForUpdate()->find($attributes['waste_record_id']);
+        $keepsListedSource = $wasteRecord !== null
+            && $wasteRecord->id === $existingWasteRecordId
+            && $wasteRecord->isListed();
+
+        if ($wasteRecord === null || (! $wasteRecord->isAvailable() && ! $keepsListedSource)) {
+            throw ValidationException::withMessages([
+                'waste_record_id' => 'Pilih catatan limbah berstatus Tersedia. Catatan terjual atau tidak tersedia tidak dapat digunakan.',
+            ]);
+        }
+
+        // This is a cap per listing, not allocation/reservation across all listings.
+        if (bccomp((string) $attributes['available_weight'], $wasteRecord->weight_kg, 3) > 0) {
+            throw ValidationException::withMessages([
+                'available_weight' => 'Berat listing tidak boleh melebihi berat pada catatan limbah produksi.',
+            ]);
+        }
     }
 
     private function isManagedPhoto(?string $path): bool
