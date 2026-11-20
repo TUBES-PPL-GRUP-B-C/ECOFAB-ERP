@@ -14,6 +14,8 @@ class WasteMarketService
      */
     public function recordWasteFromWorkOrder(int $workOrderId, string $type, float $weightKg, ?string $condition = null): bool
     {
+        app(WasteRecordService::class)->recordFromCompletedWorkOrder($workOrderId, $type, $weightKg, $condition);
+
         return true;
     }
 

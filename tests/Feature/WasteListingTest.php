@@ -341,6 +341,110 @@ class WasteListingTest extends TestCase
         Storage::disk('public')->assertExists('shared/report.png');
     }
 
+    public function test_record_created_through_production_crud_becomes_a_listing_source_and_is_then_protected(): void
+    {
+        $producer = User::factory()->create();
+        $producer->assignRole('produksi');
+        $this->actingAs($producer)->post('/produksi/limbah', [
+            'waste_type' => 'Sisa rotan integrasi', 'weight_kg' => '5.125', 'condition' => 'Bagus',
+        ])->assertRedirect()->assertSessionHasNoErrors();
+        $record = WasteRecord::firstOrFail();
+        $before = $record->getRawOriginal();
+        $this->actingAs($this->commercialUser())->get('/bursa/listing/create')->assertOk()
+            ->assertViewHas('wasteRecordIds', fn ($ids) => $ids->contains($record->id));
+        $this->post('/bursa/listing', array_replace($this->attributes(), [
+            'waste_record_id' => $record->id, 'available_weight' => '5.125',
+        ]))->assertRedirect('/bursa/listing')->assertSessionHasNoErrors();
+        $listing = WasteListing::firstOrFail();
+        $this->assertDatabaseHas('waste_listings', ['id' => $listing->id, 'waste_record_id' => $record->id, 'status' => 'draft']);
+        $this->actingAs($producer)->get("/produksi/limbah/{$record->id}")->assertOk();
+        $this->get("/produksi/limbah/{$record->id}/edit")->assertStatus(409);
+        $this->put("/produksi/limbah/{$record->id}", [
+            'waste_type' => 'Berubah', 'weight_kg' => 1, 'condition' => 'Bagus', 'status' => 'sold',
+        ])->assertStatus(409);
+        $this->delete("/produksi/limbah/{$record->id}")->assertStatus(409);
+        $this->assertSame($before, $record->fresh()->getRawOriginal());
+        $this->assertDatabaseHas('waste_listings', ['id' => $listing->id, 'waste_record_id' => $record->id]);
+    }
+
+    public function test_sold_and_unknown_sources_are_excluded_and_cannot_be_used_to_create_or_update_listings(): void
+    {
+        $this->createWasteRecordFixture();
+        $available = WasteRecord::firstOrFail();
+        $sold = WasteRecord::create(['waste_type' => 'Terjual', 'weight_kg' => 5, 'condition' => 'Bagus', 'status' => 'sold']);
+        $unknown = WasteRecord::create(['waste_type' => 'Status lama', 'weight_kg' => 5, 'condition' => 'Bagus', 'status' => 'unknown']);
+        $listing = WasteListing::create($this->attributes())->fresh();
+        $before = $listing->getRawOriginal();
+        $this->actingAs($this->commercialUser())->get('/bursa/listing/create')->assertOk()
+            ->assertViewHas('wasteRecordIds', fn ($ids) => $ids->contains($available->id) && ! $ids->contains($sold->id) && ! $ids->contains($unknown->id));
+        foreach ([$sold, $unknown] as $source) {
+            $payload = array_replace($this->attributes(), ['waste_record_id' => $source->id]);
+            $this->post('/bursa/listing', $payload)->assertSessionHasErrors('waste_record_id');
+            $this->put("/bursa/listing/{$listing->id}", $payload)->assertSessionHasErrors('waste_record_id');
+        }
+        $this->assertSame($before, $listing->fresh()->getRawOriginal());
+        $this->assertDatabaseCount('waste_listings', 1);
+    }
+
+    public function test_listing_weight_cannot_exceed_its_source_and_rejected_photo_changes_leave_no_orphans(): void
+    {
+        $this->createWasteRecordFixture();
+        Storage::fake('public');
+        $this->actingAs($this->commercialUser())->post('/bursa/listing', array_replace($this->attributes(), [
+            'photo' => UploadedFile::fake()->image('original.jpg'),
+        ]))->assertRedirect('/bursa/listing');
+        $listing = WasteListing::firstOrFail();
+        $before = $listing->getRawOriginal();
+        $filesBefore = Storage::disk('public')->allFiles('waste-listings');
+        $this->post('/bursa/listing', array_replace($this->attributes(), [
+            'available_weight' => '5.001', 'photo' => UploadedFile::fake()->image('rejected-create.jpg'),
+        ]))->assertSessionHasErrors('available_weight');
+        $this->put("/bursa/listing/{$listing->id}", array_replace($this->attributes(), [
+            'available_weight' => '5.001', 'photo' => UploadedFile::fake()->image('rejected-update.jpg'),
+        ]))->assertSessionHasErrors('available_weight');
+        $this->assertSame($before, $listing->fresh()->getRawOriginal());
+        $this->assertSame($filesBefore, Storage::disk('public')->allFiles('waste-listings'));
+        Storage::disk('public')->assertExists($listing->photo_path);
+        $this->assertDatabaseCount('waste_listings', 1);
+    }
+
+    public function test_legacy_listed_source_can_be_kept_by_its_existing_listing_but_cannot_be_selected_by_another(): void
+    {
+        $this->createWasteRecordFixture();
+        $current = WasteRecord::firstOrFail();
+        $current->update(['status' => 'listed']);
+        $other = WasteRecord::create(['waste_type' => 'Limbah listed lain', 'weight_kg' => 5, 'condition' => 'Bagus', 'status' => 'listed']);
+        $listing = WasteListing::create($this->attributes());
+        $this->actingAs($this->commercialUser())->get("/bursa/listing/{$listing->id}/edit")->assertOk()
+            ->assertViewHas('wasteRecordIds', fn ($ids) => $ids->contains($current->id) && ! $ids->contains($other->id));
+        $this->put("/bursa/listing/{$listing->id}", array_replace($this->attributes(), ['category' => 'Kategori revisi']))
+            ->assertRedirect('/bursa/listing')->assertSessionHasNoErrors();
+        $listing->refresh();
+        $before = $listing->getRawOriginal();
+        $this->put("/bursa/listing/{$listing->id}", array_replace($this->attributes(), ['waste_record_id' => $other->id]))
+            ->assertSessionHasErrors('waste_record_id');
+        $this->post('/bursa/listing', $this->attributes())->assertSessionHasErrors('waste_record_id');
+        $this->assertSame($before, $listing->fresh()->getRawOriginal());
+        $this->assertDatabaseHas('waste_records', ['id' => $current->id, 'status' => 'listed']);
+        $this->assertDatabaseCount('waste_listings', 1);
+    }
+
+    public function test_deleted_sources_cannot_be_used_even_when_a_legacy_listing_still_references_them(): void
+    {
+        $this->createWasteRecordFixture();
+        $source = WasteRecord::firstOrFail();
+        $listing = WasteListing::create($this->attributes())->fresh();
+        $before = $listing->getRawOriginal();
+        // Historical data can contain an orphan because the marketplace table has no source foreign key.
+        $source->delete();
+        $this->actingAs($this->commercialUser())->post('/bursa/listing', $this->attributes())
+            ->assertSessionHasErrors('waste_record_id');
+        $this->put("/bursa/listing/{$listing->id}", $this->attributes())->assertSessionHasErrors('waste_record_id');
+        $this->assertSame($before, $listing->fresh()->getRawOriginal());
+        $this->assertDatabaseCount('waste_listings', 1);
+        $this->assertDatabaseCount('waste_records', 0);
+    }
+
     private function commercialUser(): User
     {
         $user = User::factory()->create();
