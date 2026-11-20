@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\User;
 use App\Models\WasteListing;
+use App\Models\WasteRecord;
 use Database\Seeders\RolePermissionSeeder;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -48,6 +49,9 @@ class WasteListingTest extends TestCase
 
     public function test_missing_fr22_table_blocks_creation_without_a_database_error(): void
     {
+        // Exercise the absent dependency explicitly now that Rizal supplies its migration.
+        Schema::drop('waste_records');
+
         $this->actingAs($this->commercialUser())
             ->post('/bursa/listing', $this->attributes())
             ->assertStatus(503);
@@ -347,10 +351,12 @@ class WasteListingTest extends TestCase
 
     private function createWasteRecordFixture(): void
     {
-        Schema::create('waste_records', function (Blueprint $table) {
-            $table->id();
-        });
-        \Illuminate\Support\Facades\DB::table('waste_records')->insert(['id' => 1]);
+        WasteRecord::create([
+            'waste_type' => 'Sisa kayu uji',
+            'weight_kg' => 5,
+            'condition' => 'Bagus',
+            'status' => 'available',
+        ]);
     }
 
     private function attributes(): array

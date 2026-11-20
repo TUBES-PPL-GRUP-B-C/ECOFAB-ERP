@@ -47,3 +47,5 @@ Thumbs.db
 /.agents/
 /docs/*.md
 
+# Arahan, progres, dan todo lokal Rizal
+/docs/rizal/
