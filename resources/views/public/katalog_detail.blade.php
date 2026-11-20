@@ -15,6 +15,9 @@
             <div><dt class="font-semibold">Berat tersedia (kg)</dt><dd>{{ $listing->available_weight }}</dd></div>
             <div><dt class="font-semibold">Harga per kg (Rp)</dt><dd>{{ $listing->price_per_kg }}</dd></div>
         </dl>
+        @if ($listing->available_weight > 0)
+            <a href="{{ route('public.bursa.order.create', ['listing' => $listing->id]) }}" class="mt-6 inline-flex rounded-lg bg-brand-800 px-5 py-2.5 text-sm font-semibold text-white hover:bg-brand-900">Pesan limbah ini</a>
+        @endif
     </x-card>
 </div>
 @endsection

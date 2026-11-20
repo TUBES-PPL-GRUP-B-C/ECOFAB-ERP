@@ -45,12 +45,22 @@
     <div class="grid min-w-0 gap-6 sm:grid-cols-2 lg:grid-cols-3">
         @forelse ($listings as $listing)
             <x-card class="min-w-0 break-words">
+                @if ($listing->photo_path)
+                    <img src="{{ \Illuminate\Support\Facades\Storage::disk('public')->url($listing->photo_path) }}" alt="Foto limbah {{ $listing->category }}" loading="lazy" class="mb-4 h-40 w-full max-w-full rounded-lg object-contain">
+                @else
+                    <div class="mb-4 flex h-40 items-center justify-center rounded-lg bg-slate-50 text-sm text-slate-500">Foto belum tersedia</div>
+                @endif
                 <h2 class="font-semibold text-slate-900 [overflow-wrap:anywhere]">
                     <a href="{{ route('public.bursa.show', $listing->id) }}" class="hover:underline">{{ $listing->category }}</a>
                 </h2>
                 <p class="mt-2 text-sm">Berat tersedia: {{ $listing->available_weight }} kg</p>
                 <p class="text-sm">Harga per kg: Rp {{ $listing->price_per_kg }}</p>
-                <a href="{{ route('public.bursa.show', $listing->id) }}" class="mt-3 inline-block text-sm font-semibold text-brand-800 hover:underline">Lihat detail</a>
+                <div class="mt-3 flex flex-wrap items-center gap-3">
+                    <a href="{{ route('public.bursa.show', $listing->id) }}" class="text-sm font-semibold text-brand-800 hover:underline">Lihat detail</a>
+                    @if ($listing->available_weight > 0)
+                        <a href="{{ route('public.bursa.order.create', ['listing' => $listing->id]) }}" class="rounded-lg bg-brand-800 px-4 py-2 text-sm font-semibold text-white hover:bg-brand-900" aria-label="Pesan {{ $listing->category }}">Pesan</a>
+                    @endif
+                </div>
             </x-card>
         @empty
             <x-card class="min-w-0 sm:col-span-2 lg:col-span-3">
