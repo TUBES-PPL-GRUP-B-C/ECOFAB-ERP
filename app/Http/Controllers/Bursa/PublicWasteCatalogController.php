@@ -15,6 +15,7 @@ class PublicWasteCatalogController extends Controller
         $filters = $request->validate([
             'cari' => ['nullable', 'string', 'max:255'],
             'category' => ['nullable', 'string', 'max:255'],
+            'page' => ['nullable', 'integer', 'min:1', 'max:2147483647'],
         ]);
         $search = trim($filters['cari'] ?? '');
         $category = $filters['category'] ?? '';
@@ -30,7 +31,10 @@ class PublicWasteCatalogController extends Controller
             $query->search($search, ['category']);
         }
 
-        $listings = $query->filter(['category' => $category])->orderByDesc('id')->get();
+        $listings = $query->filter(['category' => $category])
+            ->orderByDesc('id')
+            ->paginate(12)
+            ->appends(array_filter(['cari' => $search, 'category' => $category], fn ($value) => $value !== ''));
 
         return view('public.katalog_limbah', compact('listings', 'categories', 'search', 'category'));
     }

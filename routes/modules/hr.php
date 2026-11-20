@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Hr\AttendanceController;
 use App\Http\Controllers\Hr\DepartmentController;
 use App\Http\Controllers\Hr\EmployeeController;
 use Illuminate\Support\Facades\Route;
@@ -42,7 +43,16 @@ Route::middleware(['auth', 'permission:hr.view'])->group(function () {
     Route::delete('/karyawan/{karyawan}', [EmployeeController::class, 'destroy'])
         ->middleware('permission:hr.delete')->name('hr.karyawan.destroy');
 
-    Route::get('/absensi', function () {
-        return view('hr.absensi.index');
-    })->name('hr.absensi.index');
+    Route::get('/absensi', [AttendanceController::class, 'index'])->name('hr.absensi.index');
+    Route::get('/absensi/create', [AttendanceController::class, 'create'])
+        ->middleware('permission:hr.create')->name('hr.absensi.create');
+    Route::post('/absensi', [AttendanceController::class, 'store'])
+        ->middleware('permission:hr.create')->name('hr.absensi.store');
+    Route::get('/absensi/{absensi}', [AttendanceController::class, 'show'])->name('hr.absensi.show');
+    Route::get('/absensi/{absensi}/edit', [AttendanceController::class, 'edit'])
+        ->middleware('permission:hr.update')->name('hr.absensi.edit');
+    Route::put('/absensi/{absensi}', [AttendanceController::class, 'update'])
+        ->middleware('permission:hr.update')->name('hr.absensi.update');
+    Route::delete('/absensi/{absensi}', [AttendanceController::class, 'destroy'])
+        ->middleware('permission:hr.delete')->name('hr.absensi.destroy');
 });
