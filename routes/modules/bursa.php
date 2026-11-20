@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Bursa\WasteListingController;
+use App\Http\Controllers\Bursa\WasteOrderController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -29,7 +30,14 @@ Route::middleware(['auth', 'permission:bursa.view'])->group(function () {
     Route::delete('/listing/{listing}', [WasteListingController::class, 'destroy'])
         ->middleware('permission:bursa.delete')->name('bursa.listing.destroy');
 
-    Route::get('/order', function () {
-        return view('bursa.order.index');
-    })->name('bursa.order.index');
+    Route::get('/order', [WasteOrderController::class, 'index'])->name('bursa.order.index');
+    Route::get('/order/{order}', [WasteOrderController::class, 'show'])->whereNumber('order')->name('bursa.order.show');
+    Route::get('/order/{order}/edit', [WasteOrderController::class, 'edit'])
+        ->whereNumber('order')->middleware('permission:bursa.update')->name('bursa.order.edit');
+    Route::put('/order/{order}', [WasteOrderController::class, 'update'])
+        ->whereNumber('order')->middleware('permission:bursa.update')->name('bursa.order.update');
+    Route::delete('/order/{order}', [WasteOrderController::class, 'destroy'])
+        ->whereNumber('order')->middleware('permission:bursa.delete')->name('bursa.order.destroy');
+    Route::post('/order/{order}/approve', [WasteOrderController::class, 'approve'])
+        ->whereNumber('order')->middleware('permission:order-limbah.approve')->name('bursa.order.approve');
 });
