@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Produksi\WorkOrderController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -26,9 +27,20 @@ Route::middleware(['auth', 'permission:produksi.view'])->group(function () {
         return view('produksi.bom.index');
     })->name('produksi.bom.index');
 
-    Route::get('/wo', function () {
-        return view('produksi.wo.index');
-    })->name('produksi.wo.index');
+    Route::get('/wo', [WorkOrderController::class, 'index'])->name('produksi.wo.index');
+    Route::get('/wo/create', [WorkOrderController::class, 'create'])
+        ->middleware('permission:produksi.create')->name('produksi.wo.create');
+    Route::post('/wo', [WorkOrderController::class, 'store'])
+        ->middleware('permission:produksi.create')->name('produksi.wo.store');
+    Route::get('/wo/{workOrder}', [WorkOrderController::class, 'show'])->name('produksi.wo.show');
+    Route::get('/wo/{workOrder}/edit', [WorkOrderController::class, 'edit'])
+        ->middleware('permission:produksi.update')->name('produksi.wo.edit');
+    Route::put('/wo/{workOrder}', [WorkOrderController::class, 'update'])
+        ->middleware('permission:produksi.update')->name('produksi.wo.update');
+    Route::delete('/wo/{workOrder}', [WorkOrderController::class, 'destroy'])
+        ->middleware('permission:produksi.delete')->name('produksi.wo.destroy');
+    Route::post('/wo/{workOrder}/mulai', [WorkOrderController::class, 'start'])
+        ->middleware('permission:wo.start')->name('produksi.wo.start');
 
     Route::get('/limbah', function () {
         return view('produksi.limbah.index');

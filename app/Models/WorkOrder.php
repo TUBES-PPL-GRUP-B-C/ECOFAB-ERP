@@ -11,6 +11,13 @@ class WorkOrder extends Model
 {
     use Searchable;
 
+    public const STATUSES = [
+        'draft' => 'Draft',
+        'in_progress' => 'Dalam Proses',
+        'completed' => 'Selesai',
+        'cancelled' => 'Dibatalkan',
+    ];
+
     protected $fillable = [
         'wo_number',
         'product_name',
