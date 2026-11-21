@@ -42,6 +42,8 @@ Route::middleware(['auth', 'permission:produksi.view'])->group(function () {
         ->middleware('permission:produksi.delete')->name('produksi.wo.destroy');
     Route::post('/wo/{workOrder}/mulai', [WorkOrderController::class, 'start'])
         ->middleware('permission:wo.start')->name('produksi.wo.start');
+    Route::post('/wo/{workOrder}/selesai', [WorkOrderController::class, 'finish'])
+        ->middleware('permission:wo.finish')->name('produksi.wo.finish');
 
     Route::get('/limbah', [WasteRecordController::class, 'index'])->name('produksi.limbah.index');
     Route::get('/limbah/create', [WasteRecordController::class, 'create'])

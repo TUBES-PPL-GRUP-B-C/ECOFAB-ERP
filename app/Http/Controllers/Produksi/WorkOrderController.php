@@ -118,4 +118,21 @@ class WorkOrderController extends Controller
         return redirect()->route('produksi.wo.show', $workOrder)
             ->with('success', 'Work Order berhasil dimulai.');
     }
+
+    // FR-18 WO Otomatis
+    public function finish(Request $request, WorkOrder $workOrder): RedirectResponse
+    {
+        $validated = $request->validate([
+            'actual_quantity' => ['required', 'numeric', 'gt:0', 'decimal:0,2', 'max:999999999.99'],
+            'actual_emission' => ['nullable', 'numeric', 'min:0', 'decimal:0,4', 'max:999999999.9999'],
+            'waste_type' => ['nullable', 'string', 'max:100'],
+            'waste_weight_kg' => ['nullable', 'required_with:waste_type', 'numeric', 'gt:0', 'decimal:0,3', 'max:999999999.999'],
+            'waste_condition' => ['nullable', 'string', 'max:50'],
+        ]);
+
+        $this->service->finish($workOrder, $validated);
+
+        return redirect()->route('produksi.wo.show', $workOrder)
+            ->with('success', 'Work Order berhasil diselesaikan dan limbah produksi otomatis tercatat.');
+    }
 }

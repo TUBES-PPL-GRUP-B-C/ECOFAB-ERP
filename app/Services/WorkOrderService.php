@@ -9,8 +9,11 @@ use Illuminate\Support\Facades\DB;
 
 class WorkOrderService
 {
-    public function __construct(private readonly WorkOrderReadinessChecker $readinessChecker)
-    {
+    public function __construct(
+        private readonly WorkOrderReadinessChecker $readinessChecker,
+        private readonly CarbonCalculatorService $carbonCalculator,
+        private readonly WasteRecordService $wasteRecordService,
+    ) {
     }
 
     public function create(array $data, User $creator): WorkOrder
@@ -64,6 +67,46 @@ class WorkOrderService
             ]);
 
             return $locked;
+        });
+    }
+    // FR-18 WO Otomatis
+    public function finish(WorkOrder $workOrder, array $data): WorkOrder
+    {
+        return DB::transaction(function () use ($workOrder, $data) {
+            $locked = WorkOrder::query()->lockForUpdate()->findOrFail($workOrder->id);
+            abort_unless($locked->canBeCompleted(), 409, 'Hanya Work Order berstatus In Progress yang dapat diselesaikan.');
+
+            $actualQuantity = (float) $data['actual_quantity'];
+            $actualEmission = isset($data['actual_emission']) && $data['actual_emission'] !== null
+                ? (float) $data['actual_emission']
+                : null;
+
+            if ($actualEmission === null && ! empty($data['materials']) && ! empty($data['machines'])) {
+                $calc = $this->carbonCalculator->calculateWorkOrderActual(
+                    $data['materials'],
+                    $data['machines'],
+                    $actualQuantity
+                );
+                $actualEmission = $calc['total_emission'];
+            }
+
+            $locked->update([
+                'status' => 'completed',
+                'actual_quantity' => $actualQuantity,
+                'actual_emission' => $actualEmission,
+                'completed_at' => now(),
+            ]);
+
+            if (! empty($data['waste_type']) && isset($data['waste_weight_kg'])) {
+                $this->wasteRecordService->recordFromCompletedWorkOrder(
+                    $locked->id,
+                    $data['waste_type'],
+                    (float) $data['waste_weight_kg'],
+                    $data['waste_condition'] ?? 'Bagus'
+                );
+            }
+
+            return $locked->fresh(['wasteRecords']);
         });
     }
 }
