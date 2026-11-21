@@ -62,6 +62,59 @@
         </dl>
     </x-card>
 
+    @if ($workOrder->isInProgress())
+        @can('wo.finish')
+            <x-card title="Penyelesaian Work Order (FR-18)" subtitle="Catat kuantitas produk aktual dan limbah yang dihasilkan untuk menyelesaikan perintah kerja ini.">
+                <form action="{{ route('produksi.wo.finish', $workOrder) }}" method="POST" class="space-y-4">
+                    @csrf
+                    <div class="grid gap-4 sm:grid-cols-2">
+                        <div>
+                            <label for="actual_quantity" class="block text-sm font-medium text-slate-700">Kuantitas Aktual Selesai <span class="text-rose-600">*</span></label>
+                            <input type="number" step="0.01" name="actual_quantity" id="actual_quantity" required min="0.01" value="{{ old('actual_quantity', $workOrder->target_quantity) }}" class="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-brand-500 focus:ring-brand-500 sm:text-sm">
+                            @error('actual_quantity') <p class="mt-1 text-xs text-rose-600">{{ $message }}</p> @enderror
+                        </div>
+                        <div>
+                            <label for="actual_emission" class="block text-sm font-medium text-slate-700">Estimasi Emisi Aktual (kg CO₂e)</label>
+                            <input type="number" step="0.0001" name="actual_emission" id="actual_emission" min="0" value="{{ old('actual_emission') }}" placeholder="Opsional" class="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-brand-500 focus:ring-brand-500 sm:text-sm">
+                            @error('actual_emission') <p class="mt-1 text-xs text-rose-600">{{ $message }}</p> @enderror
+                        </div>
+                    </div>
+
+                    <div class="rounded-lg border border-slate-200 bg-slate-50 p-4 space-y-4">
+                        <h4 class="text-sm font-semibold text-slate-800">Pencatatan Limbah Produksi Otomatis (FR-22)</h4>
+                        <div class="grid gap-4 sm:grid-cols-3">
+                            <div>
+                                <label for="waste_type" class="block text-xs font-medium text-slate-700">Jenis Limbah</label>
+                                <input type="text" name="waste_type" id="waste_type" placeholder="Contoh: Sisa Potongan Kayu FSC" value="{{ old('waste_type') }}" class="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-brand-500 focus:ring-brand-500 sm:text-sm">
+                                @error('waste_type') <p class="mt-1 text-xs text-rose-600">{{ $message }}</p> @enderror
+                            </div>
+                            <div>
+                                <label for="waste_weight_kg" class="block text-xs font-medium text-slate-700">Berat Limbah (kg)</label>
+                                <input type="number" step="0.001" name="waste_weight_kg" id="waste_weight_kg" min="0.001" placeholder="Contoh: 2.500" value="{{ old('waste_weight_kg') }}" class="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-brand-500 focus:ring-brand-500 sm:text-sm">
+                                @error('waste_weight_kg') <p class="mt-1 text-xs text-rose-600">{{ $message }}</p> @enderror
+                            </div>
+                            <div>
+                                <label for="waste_condition" class="block text-xs font-medium text-slate-700">Kondisi Limbah</label>
+                                <select name="waste_condition" id="waste_condition" class="mt-1 block w-full rounded-md border-slate-300 shadow-sm focus:border-brand-500 focus:ring-brand-500 sm:text-sm">
+                                    <option value="Bagus" @selected(old('waste_condition') === 'Bagus')>Bagus</option>
+                                    <option value="Kering" @selected(old('waste_condition') === 'Kering')>Kering</option>
+                                    <option value="Campur" @selected(old('waste_condition') === 'Campur')>Campur</option>
+                                </select>
+                                @error('waste_condition') <p class="mt-1 text-xs text-rose-600">{{ $message }}</p> @enderror
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="pt-2">
+                        <button type="submit" onclick="return confirm('Selesaikan Work Order ini dan catat limbah produksi?');" class="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-800">
+                            Selesaikan Work Order
+                        </button>
+                    </div>
+                </form>
+            </x-card>
+        @endcan
+    @endif
+
     @if ($workOrder->isDraft())
         <x-card title="Kesiapan Produksi" subtitle="Work Order hanya dapat dimulai setelah resep BoM dan ketersediaan stok bahan terverifikasi.">
             <div class="space-y-4">
