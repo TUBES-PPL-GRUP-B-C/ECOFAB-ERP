@@ -1,32 +1,43 @@
 <?php
 
+use App\Http\Controllers\Gudang\GoodsReceiptController;
+use App\Http\Controllers\Gudang\MaterialController;
+use App\Http\Controllers\Gudang\StockMovementController;
+use App\Http\Controllers\Gudang\WarehouseController;
+use App\Models\GoodsReceipt;
+use App\Models\Material;
+use App\Models\StockMovement;
+use App\Models\Warehouse;
 use Illuminate\Support\Facades\Route;
 
 /*
 |--------------------------------------------------------------------------
 | Modul Inventaris & Gudang (Prefix: /gudang)
 |--------------------------------------------------------------------------
-| CRUD Gudang, Material Sirkular, Mutasi Stok, dan GRN
+| Menangani FR-08 (GRN), FR-09 (Gudang), FR-10 (Material), FR-11 (Mutasi Stok).
 */
 
 Route::middleware(['auth', 'permission:gudang.view'])->group(function () {
+    // Ringkasan Modul Gudang
     Route::get('/', function () {
-        return view('gudang.index');
+        $totalWarehouses = Warehouse::count();
+        $totalMaterials = Material::count();
+        $lowStockCount = Material::all()->filter(fn ($m) => $m->is_low_stock)->count();
+        $recentMovements = StockMovement::with(['material', 'fromWarehouse', 'toWarehouse'])->latest()->limit(5)->get();
+        $recentGrn = GoodsReceipt::with('warehouse')->latest()->limit(5)->get();
+
+        return view('gudang.index', compact('totalWarehouses', 'totalMaterials', 'lowStockCount', 'recentMovements', 'recentGrn'));
     })->name('gudang.index');
 
-    Route::get('/gudang', function () {
-        return view('gudang.gudang.index');
-    })->name('gudang.gudang.index');
+    // FR-09: Kelola Gudang
+    Route::resource('gudang', WarehouseController::class)->names('gudang.gudang');
 
-    Route::get('/material', function () {
-        return view('gudang.material.index');
-    })->name('gudang.material.index');
+    // FR-10: Kelola Material
+    Route::resource('material', MaterialController::class)->names('gudang.material');
 
-    Route::get('/mutasi', function () {
-        return view('gudang.mutasi.index');
-    })->name('gudang.mutasi.index');
+    // FR-11: Kelola Mutasi Stok
+    Route::resource('mutasi', StockMovementController::class)->names('gudang.mutasi');
 
-    Route::get('/grn', function () {
-        return view('gudang.grn.index');
-    })->name('gudang.grn.index');
+    // FR-08: Kelola Penerimaan Barang (GRN)
+    Route::resource('grn', GoodsReceiptController::class)->names('gudang.grn');
 });
