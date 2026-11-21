@@ -2,11 +2,8 @@
 
 namespace Tests\Feature;
 
-use App\Models\EmissionFactor;
-use App\Models\GoodsReceipt;
 use App\Models\Material;
 use App\Models\MaterialStock;
-use App\Models\StockMovement;
 use App\Models\User;
 use App\Models\Warehouse;
 use App\Services\StockService;
