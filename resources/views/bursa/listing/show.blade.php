@@ -1,7 +1,7 @@
 @extends('layouts.app')
 
 @section('content')
-<div class="space-y-6">
+<div class="min-w-0 space-y-6 [overflow-wrap:anywhere]">
     <x-page-header title="Detail Listing #{{ $listing->id }}" subtitle="Informasi listing Bursa Limbah">
         <x-slot:actions>
             <a href="{{ route('bursa.listing.index') }}" class="text-sm font-semibold text-brand-800 hover:underline">Kembali ke daftar</a>
@@ -10,7 +10,7 @@
 
     <x-card title="Data listing">
         <dl class="grid gap-5 text-sm sm:grid-cols-2">
-            <div><dt class="font-semibold text-slate-600">Limbah produksi</dt><dd>#{{ $listing->waste_record_id }}</dd></div>
+            <div><dt class="font-semibold text-slate-600">Limbah produksi</dt><dd>#{{ $listing->waste_record_id }} — {{ $listing->wasteRecord?->waste_type ?? 'Sumber tidak tersedia' }}</dd></div>
             <div><dt class="font-semibold text-slate-600">Kategori</dt><dd>{{ $listing->category }}</dd></div>
             <div><dt class="font-semibold text-slate-600">Harga per kg (Rp)</dt><dd>{{ $listing->price_per_kg }}</dd></div>
             <div><dt class="font-semibold text-slate-600">Berat tersedia (kg)</dt><dd>{{ $listing->available_weight }}</dd></div>
@@ -19,7 +19,7 @@
         @if ($listing->photo_path)
             <div class="mt-6">
                 <p class="mb-2 text-sm font-semibold text-slate-600">Foto limbah</p>
-                <img src="{{ \Illuminate\Support\Facades\Storage::disk('public')->url($listing->photo_path) }}" alt="Foto limbah {{ $listing->category }}" class="max-h-80 rounded-lg object-contain">
+                <img src="{{ \Illuminate\Support\Facades\Storage::disk('public')->url($listing->photo_path) }}" alt="Foto limbah {{ $listing->category }}" class="max-h-80 max-w-full rounded-lg object-contain">
             </div>
         @endif
         @can('bursa.update')

@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\WasteListing;
+use App\Models\WasteRecord;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Pagination\LengthAwarePaginator;
 use Illuminate\Support\Facades\Storage;
@@ -42,11 +43,13 @@ class PublicWasteCatalogTest extends TestCase
 
     public function test_new_listings_default_to_draft_and_are_hidden_from_guests(): void
     {
+        $source = WasteRecord::create([
+            'waste_type' => 'Limbah produksi draft', 'weight_kg' => 5,
+            'condition' => 'Bagus', 'status' => 'available',
+        ]);
         $listing = WasteListing::create([
-            'waste_record_id' => 999,
-            'category' => 'Draft baru',
-            'price_per_kg' => '1250.50',
-            'available_weight' => 5,
+            'waste_record_id' => $source->id, 'category' => 'Draft baru',
+            'price_per_kg' => '1250.50', 'available_weight' => 5,
         ]);
 
         $this->assertSame('draft', $listing->fresh()->status);
@@ -101,7 +104,10 @@ class PublicWasteCatalogTest extends TestCase
             })
             ->assertSee($listing->category)
             ->assertDontSee($listing->category, false)
-            ->assertDontSee('waste_record_id');
+            ->assertDontSee('waste_record_id')
+            ->assertDontSee('work_order_id')
+            ->assertDontSee($listing->wasteRecord->notes)
+            ->assertDontSee($listing->wasteRecord->waste_type);
 
         $this->get("/bursa/katalog/{$listing->id}")->assertOk()
             ->assertViewHas('listing', function ($item) use ($publicFields) {
@@ -111,7 +117,10 @@ class PublicWasteCatalogTest extends TestCase
             })
             ->assertSee($listing->category)
             ->assertDontSee($listing->category, false)
-            ->assertDontSee('waste_record_id');
+            ->assertDontSee('waste_record_id')
+            ->assertDontSee('work_order_id')
+            ->assertDontSee($listing->wasteRecord->notes)
+            ->assertDontSee($listing->wasteRecord->waste_type);
     }
 
     public function test_catalog_does_not_mutate_listing_or_support_write_requests(): void
@@ -222,17 +231,21 @@ class PublicWasteCatalogTest extends TestCase
     {
         $listing = $this->listing('published', 5);
         $url = route('public.bursa.show', $listing->id);
+        $this->get(route('public.bursa.index'))->assertOk()->assertSee('Foto belum tersedia');
         $this->get($url)->assertOk()->assertSee('Foto limbah belum tersedia.')
             ->assertSee(route('public.bursa.index'), false)
-            ->assertDontSee(route('bursa.order.index'), false);
+            ->assertDontSee('href="'.route('bursa.order.index').'"', false);
 
         $listing->update(['photo_path' => 'waste-listings/sample.jpg']);
+        $this->get(route('public.bursa.index'))->assertOk()
+            ->assertSee(Storage::disk('public')->url($listing->photo_path), false)
+            ->assertSee('Foto limbah '.$listing->category);
         $this->get($url)->assertOk()
             ->assertSee(Storage::disk('public')->url($listing->photo_path), false)
             ->assertSee('Foto limbah '.$listing->category)
             ->assertDontSee('Foto limbah belum tersedia.')
             ->assertDontSee('waste_record_id')
-            ->assertDontSee(route('bursa.order.index'), false);
+            ->assertDontSee('href="'.route('bursa.order.index').'"', false);
     }
 
     public function test_guest_can_paginate_only_available_public_listings_without_duplicates(): void
@@ -326,15 +339,76 @@ class PublicWasteCatalogTest extends TestCase
             ->assertDontSee('Halaman katalog tidak tersedia');
     }
 
-    private function listing(string $status, string|int $weight): WasteListing
+    public function test_source_eligibility_applies_to_catalog_detail_categories_and_search(): void
     {
+        $available = $this->listing('published', 5);
+        $listed = $this->listing('published', 5, 'listed');
+        $sold = $this->listing('published', 5, 'sold');
+        $unknown = $this->listing('published', 5, 'unknown');
+        $orphan = $this->listing('published', 5);
+        $orphan->wasteRecord->delete();
+        $visibleCategories = [$available->category, $listed->category];
+
+        $this->get(route('public.bursa.index'))->assertOk()
+            ->assertViewHas('listings', fn ($items) => $items->modelKeys() === [$listed->id, $available->id])
+            ->assertViewHas('categories', function ($categories) use ($visibleCategories) {
+                $this->assertEqualsCanonicalizing($visibleCategories, $categories->all());
+
+                return true;
+            })
+            ->assertDontSee($sold->category)->assertDontSee($unknown->category)->assertDontSee($orphan->category);
+        foreach ([$available, $listed] as $visible) {
+            $this->get(route('public.bursa.show', $visible->id))->assertOk();
+        }
+        foreach ([$sold, $unknown, $orphan] as $hidden) {
+            $this->get(route('public.bursa.show', $hidden->id))->assertNotFound();
+            $this->get('/bursa/katalog?'.http_build_query(['cari' => $hidden->category, 'category' => $hidden->category]))
+                ->assertOk()->assertViewHas('listings', fn ($items) => $items->isEmpty())
+                ->assertViewHas('categories', fn ($items) => ! $items->contains($hidden->category));
+        }
+        $this->assertGuest();
+    }
+
+    public function test_public_access_rechecks_the_source_when_it_is_sold_or_deleted(): void
+    {
+        $listing = $this->listing('published', 5);
+        $source = $listing->wasteRecord;
+        $url = route('public.bursa.show', $listing->id);
+        $this->get($url)->assertOk();
+
+        $source->update(['status' => 'sold']);
+        $this->get($url)->assertNotFound();
+        $this->get(route('public.bursa.index'))->assertOk()
+            ->assertViewHas('listings', fn ($items) => $items->isEmpty())
+            ->assertViewHas('categories', fn ($items) => $items->isEmpty());
+
+        $source->update(['status' => 'listed']);
+        $this->get($url)->assertOk();
+        $source->delete();
+        $this->get($url)->assertNotFound();
+        $this->get(route('public.bursa.index'))->assertOk()
+            ->assertViewHas('listings', fn ($items) => $items->isEmpty())
+            ->assertViewHas('categories', fn ($items) => $items->isEmpty());
+        $this->assertDatabaseHas('waste_listings', ['id' => $listing->id, 'status' => 'published']);
+        $this->assertGuest();
+    }
+
+    private function listing(string $status, string|int $weight, string $sourceStatus = 'available'): WasteListing
+    {
+        $record = WasteRecord::create([
+            'waste_type' => 'Limbah produksi '.WasteRecord::count(),
+            'weight_kg' => max(5, (float) $weight),
+            'condition' => 'Bagus',
+            'status' => $sourceStatus,
+            'notes' => 'Catatan produksi internal rahasia',
+        ]);
         $listing = WasteListing::create([
-            'waste_record_id' => 999,
+            'waste_record_id' => $record->id,
             'category' => 'Kategori '.WasteListing::count(),
             'price_per_kg' => '1250.50',
             'available_weight' => $weight,
         ]);
-        // Status is intentionally not mass assignable in FR-23.
+        // Public visibility fixtures include historical statuses that are not accepted by the form.
         $listing->status = $status;
         $listing->save();
 

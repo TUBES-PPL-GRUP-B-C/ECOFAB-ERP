@@ -48,11 +48,8 @@ class PublicWasteCatalogController extends Controller
 
     private function publicListings(): Builder
     {
-        // FR-22's model/table and stock contract are not available yet.
-        // Use only listing fields; never load the unresolved wasteRecord relation.
-        return WasteListing::query()
-            ->select(['id', 'category', 'price_per_kg', 'available_weight', 'photo_path'])
-            ->where('status', 'published')
-            ->where('available_weight', '>', 0);
+        // Check the production source without adding its private fields to the public payload.
+        return WasteListing::query()->publiclyAvailable()
+            ->select(['id', 'category', 'price_per_kg', 'available_weight', 'photo_path']);
     }
 }
