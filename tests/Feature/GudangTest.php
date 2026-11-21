@@ -78,10 +78,9 @@ class GudangTest extends TestCase
 
         $stockService = app(StockService::class);
         $stockService->addStock(
-            warehouseId: $warehouse->id,
             materialId: $material->id,
-            productId: null,
-            quantity: 100.00,
+            warehouseId: $warehouse->id,
+            qty: 100.00,
             referenceType: 'INITIAL'
         );
 
@@ -105,7 +104,7 @@ class GudangTest extends TestCase
         ]);
 
         $stockService = app(StockService::class);
-        $stockService->addStock($wh1->id, $material->id, null, 80.00, 'INITIAL');
+        $stockService->addStock($material->id, $wh1->id, 80.00, 'INITIAL');
 
         // Transfer 30 kg dari WH-A ke WH-B
         $response = $this->actingAs($this->gudangUser)->post(route('gudang.mutasi.store'), [

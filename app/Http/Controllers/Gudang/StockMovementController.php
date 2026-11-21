@@ -69,19 +69,18 @@ class StockMovementController extends Controller
         try {
             if ($type === 'transfer') {
                 $this->stockService->transferStock(
+                    materialId: (int) $request->input('material_id'),
                     fromWarehouseId: (int) $request->input('from_warehouse_id'),
                     toWarehouseId: (int) $request->input('to_warehouse_id'),
-                    materialId: (int) $request->input('material_id'),
-                    productId: null,
-                    quantity: (float) $request->input('qty'),
+                    qty: (float) $request->input('qty'),
                     notes: $request->input('notes'),
                     userId: auth()->id()
                 );
             } else {
                 $this->stockService->adjustStock(
-                    warehouseId: (int) $request->input('warehouse_id'),
                     materialId: (int) $request->input('material_id'),
-                    actualQuantity: (float) $request->input('actual_qty'),
+                    warehouseId: (int) $request->input('warehouse_id'),
+                    actualQty: (float) $request->input('actual_qty'),
                     notes: $request->input('notes'),
                     userId: auth()->id()
                 );

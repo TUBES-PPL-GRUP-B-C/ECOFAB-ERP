@@ -78,10 +78,9 @@ class GoodsReceiptController extends Controller
                     ]);
 
                     $this->stockService->addStock(
-                        warehouseId: (int) $grn->warehouse_id,
                         materialId: (int) $item['material_id'],
-                        productId: null,
-                        quantity: (float) $item['qty_received'],
+                        warehouseId: (int) $grn->warehouse_id,
+                        qty: (float) $item['qty_received'],
                         referenceType: 'GRN',
                         referenceId: $grn->id,
                         notes: "Penerimaan Barang via GRN #{$grn->grn_number}",
@@ -133,11 +132,10 @@ class GoodsReceiptController extends Controller
         try {
             DB::transaction(function () use ($receipt) {
                 foreach ($receipt->items as $item) {
-                    $this->stockService->deductStock(
-                        warehouseId: (int) $receipt->warehouse_id,
+                    $this->stockService->reduceStock(
                         materialId: (int) $item->material_id,
-                        productId: null,
-                        quantity: (float) $item->qty_received,
+                        warehouseId: (int) $receipt->warehouse_id,
+                        qty: (float) $item->qty_received,
                         referenceType: 'GRN_CANCEL',
                         referenceId: $receipt->id,
                         notes: "Pembatalan GRN #{$receipt->grn_number}"

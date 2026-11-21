@@ -17,48 +17,45 @@ use Illuminate\Support\Facades\DB;
 class StockService
 {
     /**
-     * Tambah stok bahan atau produk ke gudang tertentu (GRN, WO Selesai).
+     * Tambah stok bahan ke gudang tertentu (GRN, WO Selesai).
+     *
+     * @throws Exception
      */
     public function addStock(
-        int $warehouseId,
         ?int $materialId,
-        ?int $productId,
-        float $quantity,
-        string $referenceType,
+        int $warehouseId,
+        float $qty,
+        string $referenceType = 'MANUAL',
         ?int $referenceId = null,
         ?string $notes = null,
         ?int $userId = null
-    ): bool {
-        if ($quantity <= 0) {
+    ): StockMovement {
+        if ($qty <= 0) {
             throw new Exception('Kuantitas penambahan stok harus lebih besar dari 0.');
         }
 
-        return DB::transaction(function () use ($warehouseId, $materialId, $productId, $quantity, $referenceType, $referenceId, $notes, $userId) {
+        return DB::transaction(function () use ($materialId, $warehouseId, $qty, $referenceType, $referenceId, $notes, $userId) {
             if ($materialId) {
                 $stock = MaterialStock::lockForUpdate()->firstOrCreate(
                     ['material_id' => $materialId, 'warehouse_id' => $warehouseId],
                     ['qty' => 0]
                 );
-
-                $stock->qty += $quantity;
+                $stock->qty += $qty;
                 $stock->save();
             }
 
-            // Catat ke log mutasi audit (NFR-12)
-            StockMovement::create([
+            return StockMovement::create([
                 'movement_date'   => now(),
                 'material_id'     => $materialId,
-                'product_id'      => $productId,
+                'product_id'      => null,
                 'to_warehouse_id' => $warehouseId,
                 'type'            => 'in',
-                'qty'             => $quantity,
+                'qty'             => $qty,
                 'reference_type'  => $referenceType,
                 'reference_id'    => $referenceId,
                 'notes'           => $notes ?? "Penambahan stok ke gudang #{$warehouseId}",
                 'created_by'      => $userId ?? auth()->id(),
             ]);
-
-            return true;
         });
     }
 
@@ -67,21 +64,20 @@ class StockService
      *
      * @throws Exception Jika stok tidak mencukupi
      */
-    public function deductStock(
-        int $warehouseId,
+    public function reduceStock(
         ?int $materialId,
-        ?int $productId,
-        float $quantity,
-        string $referenceType,
+        int $warehouseId,
+        float $qty,
+        string $referenceType = 'MANUAL',
         ?int $referenceId = null,
         ?string $notes = null,
         ?int $userId = null
-    ): bool {
-        if ($quantity <= 0) {
+    ): StockMovement {
+        if ($qty <= 0) {
             throw new Exception('Kuantitas pengurangan stok harus lebih besar dari 0.');
         }
 
-        return DB::transaction(function () use ($warehouseId, $materialId, $productId, $quantity, $referenceType, $referenceId, $notes, $userId) {
+        return DB::transaction(function () use ($materialId, $warehouseId, $qty, $referenceType, $referenceId, $notes, $userId) {
             if ($materialId) {
                 $stock = MaterialStock::lockForUpdate()
                     ->where('material_id', $materialId)
@@ -89,55 +85,70 @@ class StockService
                     ->first();
 
                 $currentQty = $stock ? (float) $stock->qty : 0;
-                if ($currentQty < $quantity) {
+                if ($currentQty < $qty) {
                     $material = Material::find($materialId);
                     $name = $material ? $material->name : "ID {$materialId}";
-                    throw new Exception("Stok tidak mencukupi untuk bahan '{$name}'. Saldo saat ini: {$currentQty}, dibutuhkan: {$quantity}.");
+                    throw new Exception("Stok tidak mencukupi untuk bahan '{$name}'. Saldo saat ini: {$currentQty}, dibutuhkan: {$qty}.");
                 }
 
-                $stock->qty -= $quantity;
+                $stock->qty -= $qty;
                 $stock->save();
             }
 
-            // Catat log mutasi pengeluaran
-            StockMovement::create([
+            return StockMovement::create([
                 'movement_date'     => now(),
                 'material_id'       => $materialId,
-                'product_id'        => $productId,
+                'product_id'        => null,
                 'from_warehouse_id' => $warehouseId,
                 'type'              => 'out',
-                'qty'               => $quantity,
+                'qty'               => $qty,
                 'reference_type'    => $referenceType,
                 'reference_id'      => $referenceId,
                 'notes'             => $notes ?? "Pengeluaran stok dari gudang #{$warehouseId}",
                 'created_by'        => $userId ?? auth()->id(),
             ]);
-
-            return true;
         });
     }
 
     /**
-     * Transfer stok antar gudang.
+     * Alias untuk kompatibilitas — memanggil reduceStock().
+     *
+     * @throws Exception
      */
-    public function transferStock(
-        int $fromWarehouseId,
-        int $toWarehouseId,
+    public function deductStock(
         ?int $materialId,
-        ?int $productId,
-        float $quantity,
+        int $warehouseId,
+        float $qty,
+        string $referenceType = 'MANUAL',
+        ?int $referenceId = null,
         ?string $notes = null,
         ?int $userId = null
-    ): bool {
+    ): StockMovement {
+        return $this->reduceStock($materialId, $warehouseId, $qty, $referenceType, $referenceId, $notes, $userId);
+    }
+
+    /**
+     * Transfer stok antar gudang.
+     *
+     * @throws Exception
+     */
+    public function transferStock(
+        ?int $materialId,
+        int $fromWarehouseId,
+        int $toWarehouseId,
+        float $qty,
+        ?string $notes = null,
+        ?int $userId = null
+    ): StockMovement {
         if ($fromWarehouseId === $toWarehouseId) {
             throw new Exception('Gudang asal dan gudang tujuan transfer tidak boleh sama.');
         }
 
-        if ($quantity <= 0) {
+        if ($qty <= 0) {
             throw new Exception('Kuantitas transfer harus lebih besar dari 0.');
         }
 
-        return DB::transaction(function () use ($fromWarehouseId, $toWarehouseId, $materialId, $productId, $quantity, $notes, $userId) {
+        return DB::transaction(function () use ($materialId, $fromWarehouseId, $toWarehouseId, $qty, $notes, $userId) {
             if ($materialId) {
                 $fromStock = MaterialStock::lockForUpdate()
                     ->where('material_id', $materialId)
@@ -145,46 +156,44 @@ class StockService
                     ->first();
 
                 $currentQty = $fromStock ? (float) $fromStock->qty : 0;
-                if ($currentQty < $quantity) {
+                if ($currentQty < $qty) {
                     $material = Material::find($materialId);
                     $name = $material ? $material->name : "ID {$materialId}";
-                    throw new Exception("Transfer gagal: Stok '{$name}' di gudang asal tidak mencukupi ({$currentQty} < {$quantity}).");
+                    throw new Exception("Transfer gagal: Stok '{$name}' di gudang asal tidak mencukupi ({$currentQty} < {$qty}).");
                 }
 
-                $fromStock->qty -= $quantity;
+                $fromStock->qty -= $qty;
                 $fromStock->save();
 
                 $toStock = MaterialStock::lockForUpdate()->firstOrCreate(
                     ['material_id' => $materialId, 'warehouse_id' => $toWarehouseId],
                     ['qty' => 0]
                 );
-                $toStock->qty += $quantity;
+                $toStock->qty += $qty;
                 $toStock->save();
             }
 
-            StockMovement::create([
+            return StockMovement::create([
                 'movement_date'     => now(),
                 'material_id'       => $materialId,
-                'product_id'        => $productId,
+                'product_id'        => null,
                 'from_warehouse_id' => $fromWarehouseId,
                 'to_warehouse_id'   => $toWarehouseId,
                 'type'              => 'transfer',
-                'qty'               => $quantity,
+                'qty'               => $qty,
                 'reference_type'    => 'TRANSFER',
                 'notes'             => $notes ?? "Transfer stok bahan dari gudang #{$fromWarehouseId} ke #{$toWarehouseId}",
                 'created_by'        => $userId ?? auth()->id(),
             ]);
-
-            return true;
         });
     }
 
     /**
      * Cek apakah stok di gudang tertentu mencukupi.
      */
-    public function checkStock(int $warehouseId, ?int $materialId, float $quantity): bool
+    public function checkStock(int $warehouseId, ?int $materialId, float $qty): bool
     {
-        if ($quantity <= 0) {
+        if ($qty <= 0) {
             return false;
         }
 
@@ -192,31 +201,33 @@ class StockService
             ->where('warehouse_id', $warehouseId)
             ->value('qty') ?? 0;
 
-        return (float) $stock >= $quantity;
+        return (float) $stock >= $qty;
     }
 
     /**
      * Penyesuaian stok opname fisik.
+     *
+     * @throws Exception
      */
     public function adjustStock(
+        ?int $materialId,
         int $warehouseId,
-        int $materialId,
-        float $actualQuantity,
+        float $actualQty,
         ?string $notes = null,
         ?int $userId = null
     ): StockMovement {
-        if ($actualQuantity < 0) {
+        if ($actualQty < 0) {
             throw new Exception('Jumlah stok fisik aktual tidak boleh bernilai negatif.');
         }
 
-        return DB::transaction(function () use ($warehouseId, $materialId, $actualQuantity, $notes, $userId) {
+        return DB::transaction(function () use ($materialId, $warehouseId, $actualQty, $notes, $userId) {
             $stock = MaterialStock::lockForUpdate()->firstOrCreate(
                 ['material_id' => $materialId, 'warehouse_id' => $warehouseId],
                 ['qty' => 0]
             );
 
-            $diff = $actualQuantity - (float) $stock->qty;
-            $stock->qty = $actualQuantity;
+            $diff = $actualQty - (float) $stock->qty;
+            $stock->qty = $actualQty;
             $stock->save();
 
             return StockMovement::create([
@@ -227,7 +238,7 @@ class StockService
                 'type'              => 'adjustment',
                 'qty'               => abs($diff),
                 'reference_type'    => 'ADJUSTMENT',
-                'notes'             => $notes ?? "Penyesuaian stok menjadi {$actualQuantity} (Selisih: {$diff})",
+                'notes'             => $notes ?? "Penyesuaian stok menjadi {$actualQty} (Selisih: {$diff})",
                 'created_by'        => $userId ?? auth()->id(),
             ]);
         });
