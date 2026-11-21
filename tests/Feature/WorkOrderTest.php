@@ -477,13 +477,12 @@ class WorkOrderTest extends TestCase
         $this->assertDatabaseCount('work_order_materials', 0);
     }
 
-    public function test_finish_and_cancel_endpoints_are_not_exposed_in_this_scope(): void
+    public function test_cancel_endpoint_is_not_exposed_in_this_scope(): void
     {
-        $this->assertFalse(Route::has('produksi.wo.finish'));
+        $this->assertTrue(Route::has('produksi.wo.finish'));
         $this->assertFalse(Route::has('produksi.wo.cancel'));
         $this->actingAs($this->userWithRole());
         $workOrder = $this->workOrder();
-        $this->post("/produksi/wo/{$workOrder->id}/selesai")->assertNotFound();
         $this->post("/produksi/wo/{$workOrder->id}/batal")->assertNotFound();
         $this->assertSame('draft', $workOrder->fresh()->status);
     }
