@@ -2,29 +2,28 @@
 
 namespace App\Services;
 
+use App\Models\EcoPassport;
+use App\Models\WorkOrder;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use SimpleSoftwareIO\QrCode\Facades\QrCode;
 
-/**
- * Service untuk pembuatan paspor digital produk (Eco-Passport / FR-26 & FR-27).
- *
- * Menghasilkan kode unik paspor, QRCode QR untuk kemasan fisik,
- * serta menyusun data rantai pasok / asal bahan baku produk ramah lingkungan.
- */
 class EcoPassportService
 {
-    /**
-     * Buat kode unik dan rekam paspor produk dari Work Order.
-     *
-     * @param int $workOrderId
-     * @param int $productId
-     * @param float $totalCarbonFootprint
-     * @return string Kode paspor yang dihasilkan (e.g. ECO-PASS-WO0013)
-     */
-    public function generatePassport(int $workOrderId, int $productId, float $totalCarbonFootprint): string
+    /** Buat draft untuk batch WO selesai; data produk dan emisi tetap dibaca dari WO. */
+    public function createDraft(WorkOrder $workOrder): EcoPassport
     {
-        $code = 'ECO-PASS-' . strtoupper(uniqid());
+        return DB::transaction(function () use ($workOrder) {
+            $locked = WorkOrder::query()->lockForUpdate()->findOrFail($workOrder->id);
+            abort_unless($locked->isCompleted(), 409, 'Work Order harus selesai sebelum dibuatkan Eco-Passport.');
 
-        return $code;
+            $passport = new EcoPassport();
+            $passport->work_order_id = $locked->id;
+            $passport->unique_code = 'ECO-PASS-' . strtoupper(Str::uuid()->toString());
+            $passport->save();
+
+            return $passport;
+        }, 3);
     }
 
     /**
