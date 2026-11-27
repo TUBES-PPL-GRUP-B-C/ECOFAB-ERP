@@ -43,4 +43,18 @@ class EcoPassportController extends Controller
 
         return redirect()->route('passport.index')->with('success', 'Draft Eco-Passport berhasil dibuat.');
     }
+
+    public function publish(EcoPassport $passport, EcoPassportService $service): RedirectResponse
+    {
+        $service->publish($passport);
+
+        return redirect()->route('passport.index')->with('success', 'Status Eco-Passport diubah menjadi Terbit.');
+    }
+
+    public function withdraw(EcoPassport $passport, EcoPassportService $service): RedirectResponse
+    {
+        $service->withdraw($passport);
+
+        return redirect()->route('passport.index')->with('success', 'Eco-Passport berhasil ditarik.');
+    }
 }

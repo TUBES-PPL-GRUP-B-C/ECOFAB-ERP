@@ -26,6 +26,26 @@ class EcoPassportService
         }, 3);
     }
 
+    public function publish(EcoPassport $passport): void
+    {
+        $this->transition($passport, EcoPassport::STATUS_DRAFT, EcoPassport::STATUS_PUBLISHED);
+    }
+
+    public function withdraw(EcoPassport $passport): void
+    {
+        $this->transition($passport, EcoPassport::STATUS_PUBLISHED, EcoPassport::STATUS_WITHDRAWN);
+    }
+
+    private function transition(EcoPassport $passport, string $from, string $to): void
+    {
+        $updated = EcoPassport::query()
+            ->whereKey($passport->getKey())
+            ->where('publication_status', $from)
+            ->update(['publication_status' => $to]);
+
+        abort_unless($updated === 1, 409, 'Status Eco-Passport sudah berubah atau tidak sesuai dengan tindakan ini.');
+    }
+
     /**
      * Hasilkan QR Code SVG/PNG untuk kode paspor.
      *
