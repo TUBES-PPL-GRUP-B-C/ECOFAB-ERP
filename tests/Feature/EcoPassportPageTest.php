@@ -98,6 +98,77 @@ class EcoPassportPageTest extends TestCase
         $this->assertDatabaseCount('eco_passports', 0);
     }
 
+    public function test_production_staff_can_publish_then_withdraw_a_passport(): void
+    {
+        $workOrder = $this->workOrder('completed');
+        $passport = app(EcoPassportService::class)->createDraft($workOrder);
+        $publish = route('passport.publish', $passport);
+        $withdraw = route('passport.withdraw', $passport);
+        $production = User::factory()->create()->assignRole('produksi');
+
+        $this->actingAs($production)->get(route('passport.index'))->assertOk()
+            ->assertSee($publish)->assertDontSee($withdraw);
+        $this->post($publish, ['publication_status' => 'withdrawn'])->assertRedirect(route('passport.index'));
+        $this->assertDatabaseHas('eco_passports', ['id' => $passport->id, 'publication_status' => 'published']);
+        $this->get(route('passport.index'))->assertOk()
+            ->assertSee('>Terbit</td>', false)->assertSee($withdraw)->assertDontSee($publish);
+
+        $this->post($withdraw)->assertRedirect(route('passport.index'));
+        $this->assertDatabaseHas('eco_passports', [
+            'id' => $passport->id,
+            'work_order_id' => $workOrder->id,
+            'unique_code' => $passport->unique_code,
+            'publication_status' => 'withdrawn',
+        ]);
+        $this->get(route('passport.index'))->assertOk()
+            ->assertSee('>Ditarik</td>', false)->assertDontSee($publish)->assertDontSee($withdraw);
+    }
+
+    public function test_out_of_order_and_repeated_transitions_are_rejected(): void
+    {
+        $passport = app(EcoPassportService::class)->createDraft($this->workOrder('completed'));
+        $publish = route('passport.publish', $passport);
+        $withdraw = route('passport.withdraw', $passport);
+        $admin = User::factory()->create()->assignRole('admin');
+
+        $this->actingAs($admin)->post($withdraw)->assertConflict();
+        $this->assertDatabaseHas('eco_passports', ['id' => $passport->id, 'publication_status' => 'draft']);
+        $this->post($publish)->assertRedirect(route('passport.index'));
+        $this->post($publish)->assertConflict();
+        $this->assertDatabaseHas('eco_passports', ['id' => $passport->id, 'publication_status' => 'published']);
+        $this->post($withdraw)->assertRedirect(route('passport.index'));
+        $this->post($withdraw)->assertConflict();
+        $this->post($publish)->assertConflict();
+        $this->assertDatabaseHas('eco_passports', ['id' => $passport->id, 'publication_status' => 'withdrawn']);
+        $this->post(route('passport.publish', $passport->id + 1))->assertNotFound();
+    }
+
+    public function test_both_transitions_require_view_and_publish_permissions(): void
+    {
+        $workOrder = $this->workOrder('completed');
+        $service = app(EcoPassportService::class);
+        $draft = $service->createDraft($workOrder);
+        $published = $service->createDraft($workOrder);
+        $service->publish($published);
+        $publish = route('passport.publish', $draft);
+        $withdraw = route('passport.withdraw', $published);
+
+        $this->post($publish)->assertRedirect(route('login'));
+        $this->post($withdraw)->assertRedirect(route('login'));
+
+        $viewer = User::factory()->create()->givePermissionTo('passport.view', 'passport.create');
+        $this->actingAs($viewer)->get(route('passport.index'))->assertOk()
+            ->assertDontSee($publish)->assertDontSee($withdraw);
+        $this->post($publish)->assertForbidden();
+        $this->post($withdraw)->assertForbidden();
+
+        $publisher = User::factory()->create()->givePermissionTo('passport.publish');
+        $this->actingAs($publisher)->post($publish)->assertForbidden();
+        $this->post($withdraw)->assertForbidden();
+        $this->assertDatabaseHas('eco_passports', ['id' => $draft->id, 'publication_status' => 'draft']);
+        $this->assertDatabaseHas('eco_passports', ['id' => $published->id, 'publication_status' => 'published']);
+    }
+
     public function test_public_passport_route_still_serves_the_existing_scan_view(): void
     {
         $workOrder = $this->workOrder('completed');
